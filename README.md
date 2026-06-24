@@ -18,7 +18,7 @@ await bismite.record(userId, "chat-message", { tokens });     // meter
 | `packages/sdk` | The `bismite` SDK — `check` / `record`, local rule eval, counters |
 | `services/counter` | Local usage-counter service (zero-setup demo backend) |
 | `examples/nextjs-chat` | Runnable Next.js chat app — the gate → meter → upgrade loop end to end |
-| `landing/index.html` | Marketing landing page |
+| `examples/nextjs-chat/public/landing.html` | Marketing landing page (served at `/landing.html`); the waitlist form posts to `/api/waitlist` → Upstash |
 | `PRD.md`, `issues/` | Product doc and the build issues |
 
 ## Quickstart
