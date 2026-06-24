@@ -7,7 +7,7 @@ export async function GET(req: Request) {
   const access = await bismite.check(userId, "chat-message");
   const unlimited = access.remaining === Infinity;
   return Response.json({
-    plan: getPlan(userId),
+    plan: await getPlan(userId),
     unlimited,
     remaining: unlimited ? null : access.remaining, // Infinity -> null isn't JSON-safe
   });
@@ -20,7 +20,7 @@ export async function POST(req: Request) {
   const access = await bismite.check(userId, "chat-message");
   if (!access.allowed) {
     return Response.json(
-      { error: "limit_reached", upgradeUrl: access.upgradeUrl, plan: getPlan(userId) },
+      { error: "limit_reached", upgradeUrl: access.upgradeUrl, plan: await getPlan(userId) },
       { status: 402 },
     );
   }
@@ -33,7 +33,7 @@ export async function POST(req: Request) {
   const unlimited = access.remaining === Infinity;
   return Response.json({
     reply,
-    plan: getPlan(userId),
+    plan: await getPlan(userId),
     unlimited,
     remaining: unlimited ? null : access.remaining - 1,
   });

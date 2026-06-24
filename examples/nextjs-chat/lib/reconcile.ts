@@ -7,12 +7,12 @@ import { planForSubscription } from "../bismite.config";
 // our state says Free, paying user locked out) this product exists to prevent.
 export async function reconcile(userId: string): Promise<void> {
   if (!stripe) return;
-  const customerId = customerForUser(userId);
+  const customerId = await customerForUser(userId);
   if (!customerId) {
-    setPlan(userId, "free");
+    await setPlan(userId, "free");
     return;
   }
   const subs = await stripe.subscriptions.list({ customer: customerId, status: "all", limit: 1 });
   const sub = subs.data[0];
-  setPlan(userId, sub ? planForSubscription(sub.status, sub.items.data[0]?.price.id) : "free");
+  await setPlan(userId, sub ? planForSubscription(sub.status, sub.items.data[0]?.price.id) : "free");
 }

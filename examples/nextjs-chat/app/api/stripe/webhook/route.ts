@@ -23,11 +23,11 @@ export async function POST(req: Request) {
     case "checkout.session.completed": {
       const s = event.data.object;
       if (s.client_reference_id && s.customer) {
-        linkCustomer(s.client_reference_id, String(s.customer));
+        await linkCustomer(s.client_reference_id, String(s.customer));
       }
       if (s.client_reference_id && s.subscription) {
         const sub = await stripe.subscriptions.retrieve(String(s.subscription));
-        setPlan(s.client_reference_id, planForSubscription(sub.status, sub.items.data[0]?.price.id));
+        await setPlan(s.client_reference_id, planForSubscription(sub.status, sub.items.data[0]?.price.id));
       }
       break;
     }
@@ -35,8 +35,8 @@ export async function POST(req: Request) {
     case "customer.subscription.updated":
     case "customer.subscription.deleted": {
       const sub = event.data.object;
-      const userId = userForCustomer(String(sub.customer));
-      if (userId) setPlan(userId, planForSubscription(sub.status, sub.items.data[0]?.price.id));
+      const userId = await userForCustomer(String(sub.customer));
+      if (userId) await setPlan(userId, planForSubscription(sub.status, sub.items.data[0]?.price.id));
       break;
     }
   }

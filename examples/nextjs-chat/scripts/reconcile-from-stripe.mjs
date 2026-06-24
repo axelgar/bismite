@@ -1,10 +1,11 @@
-// Rebuild local plan state from Stripe (bulk reconciliation). Recovers from
-// missed/lost webhooks or a wiped in-memory store. Run: node --env-file=.env scripts/reconcile-from-stripe.mjs
-import { writeFileSync } from "node:fs";
-
+// Rebuild plan state from Stripe into Upstash (bulk reconciliation). Recovers
+// from missed/lost webhooks. Run: node --env-file=.env scripts/reconcile-from-stripe.mjs
 const KEY = process.env.STRIPE_SECRET_KEY;
 const PRICE = process.env.STRIPE_PRICE_PRO;
+const U_URL = process.env.UPSTASH_REDIS_REST_URL;
+const U_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 if (!KEY) { console.error("STRIPE_SECRET_KEY missing"); process.exit(1); }
+if (!U_URL || !U_TOKEN) { console.error("UPSTASH_REDIS_REST_URL / _TOKEN missing"); process.exit(1); }
 
 async function stripe(path) {
   const r = await fetch(`https://api.stripe.com/v1/${path}`, { headers: { authorization: `Bearer ${KEY}` } });
@@ -12,9 +13,14 @@ async function stripe(path) {
   if (j.error) throw new Error(j.error.message);
   return j;
 }
+async function redis(...parts) {
+  const path = parts.map(encodeURIComponent).join("/");
+  const r = await fetch(`${U_URL}/${path}`, { headers: { authorization: `Bearer ${U_TOKEN}` } });
+  if (!r.ok) throw new Error(`upstash ${parts[0]} ${r.status}`);
+  return (await r.json()).result;
+}
 
 const sessions = await stripe("checkout/sessions?limit=20");
-const state = { plan: {}, cust: {} };
 
 for (const s of sessions.data) {
   if (s.status !== "complete" || !s.client_reference_id || !s.customer) continue;
@@ -25,11 +31,10 @@ for (const s of sessions.data) {
     const priceId = sub.items?.data?.[0]?.price?.id;
     plan = active && priceId === PRICE ? "pro" : "free";
   }
-  state.plan[s.client_reference_id] = plan;
-  state.cust[`u:${s.client_reference_id}`] = s.customer;
-  state.cust[`c:${s.customer}`] = s.client_reference_id;
+  await redis("set", `bismite:plan:${s.client_reference_id}`, plan);
+  await redis("set", `bismite:cust:u:${s.client_reference_id}`, s.customer);
+  await redis("set", `bismite:cust:c:${s.customer}`, s.client_reference_id);
   console.log(`${s.client_reference_id} -> ${plan} (customer ${s.customer})`);
 }
 
-writeFileSync(".bismite-state.json", JSON.stringify(state, null, 2));
-console.log("wrote .bismite-state.json");
+console.log("reconciled into Upstash");
