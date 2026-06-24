@@ -1,0 +1,10 @@
+{
+  "name": "bismite",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./http-counter": "./src/http-counter.ts",
+    "./redis-counter": "./src/redis-counter.ts"
+  }
+}

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bismite — gate, meter & monetize any feature in 3 lines</title>
+  <style>
+    :root { --bg:#0b0d12; --fg:#e8eaed; --muted:#9aa3b2; --accent:#7c9cff; --card:#13161d; --line:#222734; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 system-ui, sans-serif; }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 80px 24px; }
+    h1 { font-size: 2.6rem; line-height:1.15; margin:0 0 16px; letter-spacing:-0.02em; }
+    h1 .accent { color: var(--accent); }
+    .sub { font-size:1.2rem; color:var(--muted); margin:0 0 36px; }
+    pre { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:20px; overflow:auto; font-size:13.5px; }
+    code { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+    .c { color:#c5cad6; } .k { color:#7c9cff; } .s { color:#9ece6a; } .m { color:#e0af68; }
+    .props { display:grid; gap:16px; margin:40px 0; }
+    .prop { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px 20px; }
+    .prop b { color:var(--fg); }
+    form { display:flex; gap:10px; margin-top:16px; flex-wrap:wrap; }
+    input { flex:1; min-width:220px; padding:13px 16px; border-radius:10px; border:1px solid var(--line); background:#0e1117; color:var(--fg); font-size:15px; }
+    button { padding:13px 22px; border-radius:10px; border:0; background:var(--accent); color:#0b0d12; font-weight:600; font-size:15px; cursor:pointer; }
+    .foot { color:var(--muted); font-size:13px; margin-top:14px; }
+    .tag { display:inline-block; font-size:12px; color:var(--accent); border:1px solid var(--line); border-radius:999px; padding:4px 12px; margin-bottom:24px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <span class="tag">SDK-first billing for AI apps</span>
+    <h1>Gate, meter & monetize any feature in <span class="accent">3 lines</span>.</h1>
+    <p class="sub">Bismite is the billing runtime that lives in your code — and <b>never takes your app down</b>.</p>
+
+<pre><code><span class="k">const</span> access = <span class="k">await</span> bismite.<span class="m">check</span>(userId, <span class="s">"chat-message"</span>);   <span class="c">// gate</span>
+<span class="k">if</span> (!access.allowed) <span class="k">return</span> Response.<span class="m">json</span>({ upgradeUrl: access.upgradeUrl }, { status: <span class="m">402</span> });
+
+<span class="c">// ...your expensive LLM call...</span>
+
+<span class="k">await</span> bismite.<span class="m">record</span>(userId, <span class="s">"chat-message"</span>, { tokens });        <span class="c">// meter</span></code></pre>
+
+    <div class="props">
+      <div class="prop"><b>Never goes down.</b> Plan checks run locally; the usage meter fails open. Your app never breaks because of us.</div>
+      <div class="prop"><b>Correct under load.</b> Atomic, period-scoped usage counts across every serverless instance — no lost or double counts.</div>
+      <div class="prop"><b>Monetize instantly.</b> Limit reached → the right paywall → Stripe Checkout → unlocked, with no deploy.</div>
+    </div>
+
+    <h2>Get early access</h2>
+    <!-- TODO: wire `action` to your form/email service (e.g. a /api/waitlist route or Formspree). -->
+    <form action="#" method="post" onsubmit="this.querySelector('.foot')?.remove();this.insertAdjacentHTML('beforeend','<p class=&quot;foot&quot;>Thanks — we\'ll be in touch.</p>');return false;">
+      <input type="email" name="email" placeholder="you@company.com" required />
+      <button type="submit">Request access</button>
+    </form>
+    <p class="foot">For developers building AI apps. <code>npm install bismite</code></p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,8 @@
+{
+  "name": "@bismite/counter",
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.ts"
+  }
+}
