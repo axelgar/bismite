@@ -1,12 +1,13 @@
 // Vercel entry. vercel.json rewrites every path here; createHandler matches by
-// suffix, so /v1/usage and /health route correctly. This package is ESM
-// ("type":"module"), so Vercel compiles core.ts -> core.js and the runtime import
-// must use the ".js" specifier (NodeNext) — distinct from the local server's
-// "./core.ts" (Node type-stripping). api/ only ever runs on Vercel, so .js is safe.
-// The handler tolerates Vercel's pre-parsed req.body, so no bodyParser config needed.
-import { resolveProject, makeStore, createHandler } from "../src/core.js";
+// suffix, so /v1/usage and /health route correctly. This service is NodeNext ESM:
+// every relative import uses the ".js" specifier (Vercel compiles .ts -> .js and
+// keeps the specifier literal). Locally we run via tsx, which resolves ".js" -> the
+// real ".ts" file. The handler tolerates Vercel's pre-parsed req.body, no bodyParser.
+import { makeStore, createHandler } from "../src/core.js";
+import { makeControlPlane } from "../src/db.js";
 
 export default createHandler(
-  resolveProject.parse(process.env.BISMITE_API_KEYS),
+  makeControlPlane(process.env),
   makeStore(process.env),
+  process.env.ADMIN_TOKEN,
 );

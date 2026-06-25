@@ -1,24 +1,38 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolveProject, nsKey, makeStore } from "../src/core.ts";
+import { nsKey, makeStore } from "../src/core.js";
+import { makeControlPlane } from "../src/db.js";
 
-const keys = resolveProject.parse(undefined); // built-in dev seed
+// No DATABASE_URL => PGlite in-memory, exercising the real Drizzle schema + SQL.
+const cp = makeControlPlane({});
 
-test("resolveProject: valid Bearer key -> project, else null (401)", () => {
-  assert.equal(resolveProject("Bearer bsk_test_dev", keys), "proj_dev");
-  assert.equal(resolveProject("bearer bsk_test_dev", keys), "proj_dev"); // case-insensitive scheme
-  assert.equal(resolveProject(undefined, keys), null);
-  assert.equal(resolveProject("Bearer nope", keys), null);
-  assert.equal(resolveProject("bsk_test_dev", keys), null); // missing scheme
+test("nsKey: prefixes by project AND mode so tenants/modes can't collide", () => {
+  assert.equal(nsKey("proj_a", "live", "u:f:2026-06"), "proj_a:live:u:f:2026-06");
+  assert.notEqual(nsKey("proj_a", "live", "k"), nsKey("proj_b", "live", "k")); // tenant isolation
+  assert.notEqual(nsKey("proj_a", "test", "k"), nsKey("proj_a", "live", "k")); // mode isolation
 });
 
-test("resolveProject.parse: env map overrides the default seed", () => {
-  assert.deepEqual(resolveProject.parse("k1=p1, k2=p2"), { k1: "p1", k2: "p2" });
+test("createProject mints resolvable test + live keys with the right prefixes", async () => {
+  const { projectId, test: testKey, live: liveKey } = await cp.createProject("acme", "u1");
+  assert.match(testKey, /^bsk_test_/);
+  assert.match(liveKey, /^bsk_live_/);
+
+  assert.deepEqual(await cp.resolveKey(testKey), { projectId, mode: "test" });
+  assert.deepEqual(await cp.resolveKey(liveKey), { projectId, mode: "live" });
+
+  // Unknown key => null (=> 401), and the scheme/value must match exactly.
+  assert.equal(await cp.resolveKey("bsk_test_nope"), null);
 });
 
-test("nsKey: prefixes by project so tenants can't collide", () => {
-  assert.equal(nsKey("proj_a", "u:f:2026-06"), "proj_a:u:f:2026-06");
-  assert.notEqual(nsKey("proj_a", "u:f:2026-06"), nsKey("proj_b", "u:f:2026-06"));
+test("regenerate replaces the key for a mode and invalidates the old one", async () => {
+  const { projectId, test: oldKey, live: liveKey } = await cp.createProject("bravo", "u2");
+  assert.deepEqual(await cp.resolveKey(oldKey), { projectId, mode: "test" }); // warms cache too
+
+  const newKey = await cp.regenerate(projectId, "test");
+  assert.notEqual(newKey, oldKey);
+  assert.equal(await cp.resolveKey(oldKey), null, "old key no longer resolves");
+  assert.deepEqual(await cp.resolveKey(newKey), { projectId, mode: "test" });
+  assert.deepEqual(await cp.resolveKey(liveKey), { projectId, mode: "live" }, "live key untouched");
 });
 
 test("makeStore (memory): increment returns running total, read reflects it", async () => {

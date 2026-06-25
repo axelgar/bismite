@@ -1,32 +1,13 @@
-// Pure-ish counter core: key auth, tenant namespacing, the store seam, and the
-// shared request handler. Kept out of index.ts so it's testable without booting a
-// server and reusable by both the local server and the Vercel function.
+// Counter HTTP core: key auth (via the control plane), tenant + mode namespacing,
+// the store seam, and the shared request handler. Kept out of index.ts so it's
+// testable without booting a server and reusable by the local server + Vercel fn.
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { ControlPlane, Mode } from "./db.js";
 
-// Built-in dev seed so the example + smoke run with zero config. Real keys are
-// seeded via BISMITE_API_KEYS in deploys; issuance (hashed, test/live) is hosted #2.
-const DEFAULT_KEYS = "bsk_test_dev=proj_dev,bsk_test_other=proj_other";
-
-/** Resolve `Authorization: Bearer <key>` -> project id, or null (=> 401). */
-export function resolveProject(
-  authHeader: string | undefined,
-  keys: Record<string, string>,
-): string | null {
-  const m = /^Bearer\s+(.+)$/i.exec(authHeader ?? "");
-  return (m && keys[m[1]]) || null;
-}
-/** Parse the seeded "key=proj,key2=proj2" map (defaults to the dev seed). */
-resolveProject.parse = (raw: string | undefined): Record<string, string> =>
-  Object.fromEntries(
-    (raw || DEFAULT_KEYS)
-      .split(",")
-      .map((p) => p.trim().split("="))
-      .filter(([k, v]) => k && v),
-  );
-
-/** Tenant namespace: a key from project A can never read/write project B's counts. */
-export function nsKey(proj: string, key: string): string {
-  return `${proj}:${key}`;
+/** Tenant + mode namespace: a key from project A can never read/write project B's
+ *  counts, and a project's `test` traffic is isolated from its `live` counts. */
+export function nsKey(proj: string, mode: Mode, key: string): string {
+  return `${proj}:${mode}:${key}`;
 }
 
 export interface Store {
@@ -34,15 +15,58 @@ export interface Store {
   increment(key: string, amount: number): Promise<number>;
 }
 
+/** Bearer token off a request, or null. Used for both API keys and the admin token. */
+function bearer(authHeader: string | undefined): string | null {
+  const m = /^Bearer\s+(.+)$/i.exec(authHeader ?? "");
+  return m ? m[1] : null;
+}
+
+/** Read+parse a JSON body, tolerating hosts (Vercel) that pre-parse req.body.
+ *  Throws "invalid json" / "body too large" so the handler can map them to 400/413. */
+async function readJson(req: IncomingMessage): Promise<any> {
+  let pre: unknown;
+  try {
+    pre = (req as { body?: unknown }).body;
+  } catch {
+    throw new Error("invalid json");
+  }
+  if (pre !== undefined && pre !== null) {
+    try {
+      return typeof pre === "string" ? JSON.parse(pre || "{}") : pre;
+    } catch {
+      throw new Error("invalid json");
+    }
+  }
+  let raw = "";
+  for await (const chunk of req) {
+    raw += chunk;
+    if (raw.length > 4096) throw new Error("body too large");
+  }
+  try {
+    return JSON.parse(raw || "{}");
+  } catch {
+    throw new Error("invalid json");
+  }
+}
+
 /** The HTTP request handler, framework-agnostic over node's req/res. Shared by the
- *  local node:http server (src/index.ts) and the Vercel function (api/index.ts) so
- *  routing/auth/validation live in exactly one place. Paths are matched by suffix
- *  so it works whether the host serves `/v1/usage` or rewrites it under `/api`. */
-export function createHandler(keys: Record<string, string>, store: Store) {
+ *  local node:http server (src/index.ts) and the Vercel function (api/index.ts).
+ *  Paths are matched by suffix so it works whether the host serves `/v1/usage` or
+ *  rewrites it under `/api`. `adminToken` guards key issuance (unset => open, for
+ *  local dev; the dashboard + better-auth own real issuance authz in hosted #4). */
+export function createHandler(cp: ControlPlane, store: Store, adminToken?: string) {
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const json = (code: number, body: unknown) => {
       res.writeHead(code, { "content-type": "application/json" });
       res.end(JSON.stringify(body));
+    };
+    const body = async () => {
+      try {
+        return { ok: true as const, data: await readJson(req) };
+      } catch (e) {
+        json((e as Error).message === "body too large" ? 413 : 400, { error: (e as Error).message });
+        return { ok: false as const };
+      }
     };
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
@@ -50,58 +74,56 @@ export function createHandler(keys: Record<string, string>, store: Store) {
 
       if (req.method === "GET" && path.endsWith("/health")) return json(200, { ok: true });
 
-      // Everything under /v1 is authed: Bearer key -> project, or 401. The project
-      // id becomes the key prefix, so a tenant can only touch its own namespace.
-      const proj = resolveProject(req.headers.authorization, keys);
-      if (!proj) return json(401, { error: "invalid api key" });
+      // --- Admin: key issuance (no API key; guarded by the admin token when set). ---
+      const isAdmin = !adminToken || bearer(req.headers.authorization) === adminToken;
+
+      if (req.method === "POST" && path.endsWith("/v1/projects")) {
+        if (!isAdmin) return json(401, { error: "admin only" });
+        const b = await body();
+        if (!b.ok) return;
+        const { name = "", owner = "" } = b.data ?? {};
+        const out = await cp.createProject(String(name), String(owner));
+        return json(200, out); // secrets revealed once, here only
+      }
+
+      if (req.method === "POST" && path.endsWith("/v1/keys/regenerate")) {
+        if (!isAdmin) return json(401, { error: "admin only" });
+        const b = await body();
+        if (!b.ok) return;
+        const { projectId, mode } = b.data ?? {};
+        if (typeof projectId !== "string" || (mode !== "test" && mode !== "live")) {
+          return json(400, { error: "projectId and mode (test|live) required" });
+        }
+        return json(200, { key: await cp.regenerate(projectId, mode) });
+      }
+
+      // --- Usage: authed by the project's API key -> {project, mode} or 401. ---
+      const rawKey = bearer(req.headers.authorization);
+      const resolved = rawKey ? await cp.resolveKey(rawKey) : null;
+      if (!resolved) return json(401, { error: "invalid api key" });
+      const { projectId, mode } = resolved;
 
       if (req.method === "POST" && path.endsWith("/v1/usage/increment")) {
-        let parsed: { key?: unknown; amount?: unknown };
-        let pre: unknown;
-        try {
-          // Some hosts (Vercel) expose a lazily-parsed body getter that throws on
-          // malformed JSON — turn that into a clean 400 rather than a 500.
-          pre = (req as { body?: unknown }).body;
-        } catch {
-          return json(400, { error: "invalid json" });
-        }
-        if (pre !== undefined && pre !== null) {
-          // Host already parsed the body (e.g. Vercel) — use it instead of the stream.
-          try {
-            parsed = typeof pre === "string" ? JSON.parse(pre || "{}") : (pre as object);
-          } catch {
-            return json(400, { error: "invalid json" });
-          }
-        } else {
-          let raw = "";
-          for await (const chunk of req) {
-            raw += chunk;
-            if (raw.length > 4096) return json(413, { error: "body too large" });
-          }
-          try {
-            parsed = JSON.parse(raw || "{}");
-          } catch {
-            return json(400, { error: "invalid json" });
-          }
-        }
-        const { key, amount = 1 } = parsed;
+        const b = await body();
+        if (!b.ok) return;
+        const { key, amount = 1 } = b.data ?? {};
         if (typeof key !== "string" || !key) return json(400, { error: "missing key" });
         if (typeof amount !== "number" || !Number.isFinite(amount)) {
           return json(400, { error: "invalid amount" });
         }
-        return json(200, { used: await store.increment(nsKey(proj, key), amount) });
+        return json(200, { used: await store.increment(nsKey(projectId, mode, key), amount) });
       }
 
       if (req.method === "GET" && path.endsWith("/v1/usage")) {
         const key = url.searchParams.get("key");
         if (!key) return json(400, { error: "missing key" });
-        return json(200, { used: await store.read(nsKey(proj, key)) });
+        return json(200, { used: await store.read(nsKey(projectId, mode, key)) });
       }
 
       res.writeHead(404);
       res.end();
     } catch (err) {
-      // Never hang a request on an unexpected error (e.g. a store/network blip).
+      // Never hang a request on an unexpected error (e.g. a store/DB blip).
       console.error("counter error:", err);
       if (!res.headersSent) json(500, { error: "internal error" });
     }

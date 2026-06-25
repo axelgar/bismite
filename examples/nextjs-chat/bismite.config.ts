@@ -7,17 +7,19 @@ import { plans, planForPrice, planForSubscription } from "./lib/plan-mapping";
 // Re-export the plan map + pure mappers so routes import from one place.
 export { plans, planForPrice, planForSubscription };
 
-// Lead with the hosted counter: one API key, no second vendor. The dev seed key +
-// local service URL make the demo run with zero config. BYO-Upstash is the
-// no-lock-in escape hatch — opt in explicitly with BISMITE_COUNTER=upstash. (Mere
-// presence of UPSTASH_* can't mean "counter" — the app uses it for plan state too.)
+// Lead with the hosted counter: one API key, no second vendor. Mint a key against
+// a running counter service (`pnpm counter` then `pnpm issue-key`) and set
+// BISMITE_API_KEY — no more seed. An unset/invalid key fails open (ungated) rather
+// than crashing. BYO-Upstash is the no-lock-in escape hatch — opt in explicitly
+// with BISMITE_COUNTER=upstash. (Mere presence of UPSTASH_* can't mean "counter" —
+// the app uses it for plan state too.)
 const counter =
   process.env.BISMITE_COUNTER === "upstash" &&
   process.env.UPSTASH_REDIS_REST_URL &&
   process.env.UPSTASH_REDIS_REST_TOKEN
     ? upstashCounter(process.env.UPSTASH_REDIS_REST_URL, process.env.UPSTASH_REDIS_REST_TOKEN)
     : bismiteCounter(
-        process.env.BISMITE_API_KEY ?? "bsk_test_dev",
+        process.env.BISMITE_API_KEY ?? "",
         process.env.BISMITE_API_URL ?? "http://localhost:4000",
       );
 

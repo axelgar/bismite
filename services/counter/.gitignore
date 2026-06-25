@@ -1,1 +1,4 @@
 .vercel
+.pglite
+.env
+.env.*

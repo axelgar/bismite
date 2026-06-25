@@ -1,9 +1,14 @@
 import { createServer } from "node:http";
-import { resolveProject, makeStore, createHandler } from "./core.ts";
+import { makeStore, createHandler } from "./core.js";
+import { makeControlPlane } from "./db.js";
 
-// Local node:http server (`pnpm counter`). The same handler runs on Vercel via
-// api/index.ts. Seeded api-key -> project map (issuance + control plane = hosted #2).
-const handler = createHandler(resolveProject.parse(process.env.BISMITE_API_KEYS), makeStore(process.env));
+// Local node:http server (`pnpm counter`). Same handler runs on Vercel via
+// api/index.ts. Control plane = Neon when DATABASE_URL is set, else file-backed
+// PGlite so locally-minted keys survive restarts (the example's dev loop).
+if (!process.env.DATABASE_URL && !process.env.PGLITE_DATA) {
+  process.env.PGLITE_DATA = `${import.meta.dirname}/../.pglite`;
+}
+const handler = createHandler(makeControlPlane(process.env), makeStore(process.env), process.env.ADMIN_TOKEN);
 
 const port = Number(process.env.PORT ?? 4000);
 createServer(handler).listen(port, () => console.log(`counter listening on :${port}`));

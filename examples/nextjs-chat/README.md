@@ -6,11 +6,14 @@ The whole product in one route: gate a feature before the work, meter it after.
 # from the monorepo root
 pnpm install
 
-# 1. start the hosted counter service (defaults to :4000, dev seed key baked in)
+# 1. start the hosted counter service (defaults to :4000)
 pnpm counter
 
-# 2. in another terminal, run the example — the config defaults to the hosted
-#    counter (dev key bsk_test_dev @ localhost:4000), so no extra env is needed
+# 2. in another terminal, mint a project + API key, then set it
+pnpm issue-key                       # prints a bsk_test_ key
+export BISMITE_API_KEY=bsk_test_...  # paste the test key
+
+# 3. run the example (reads BISMITE_API_KEY; unset = ungated/fail-open)
 pnpm --filter nextjs-chat dev
 ```
 
