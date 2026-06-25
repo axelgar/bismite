@@ -1,4 +1,4 @@
-import type { CounterClient } from "./index.ts";
+import type { CounterClient } from "./index.js";
 
 /** HTTP-backed usage meter. Throws on any failure so the SDK's check/record
  *  fail-open logic kicks in. The base URL points at the counter service. */

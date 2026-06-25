@@ -1,4 +1,4 @@
-import type { CounterClient } from "./index.ts";
+import type { CounterClient } from "./index.js";
 
 /** Upstash Redis usage meter (issue #4). Correct across instances/regions:
  *  INCRBY is atomic, so concurrent records never lose or double-count. Keys are

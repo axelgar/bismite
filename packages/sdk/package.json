@@ -1,10 +1,32 @@
 {
   "name": "bismite",
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "description": "SDK-first billing & entitlements runtime on Stripe — gate, meter, and monetize any feature in 3 lines, and it never takes your app down.",
   "type": "module",
+  "license": "MIT",
+  "author": "Àxel García Roigé",
+  "homepage": "https://github.com/axelgar/bismite#readme",
+  "repository": { "type": "git", "url": "git+https://github.com/axelgar/bismite.git", "directory": "packages/sdk" },
+  "keywords": ["billing", "entitlements", "feature-gating", "usage-metering", "stripe", "saas", "paywall", "rate-limit", "ai"],
+  "sideEffects": false,
+  "files": ["dist", "README.md"],
   "exports": {
     ".": "./src/index.ts",
     "./http-counter": "./src/http-counter.ts",
     "./redis-counter": "./src/redis-counter.ts"
+  },
+  "scripts": {
+    "build": "tsup",
+    "prepublishOnly": "pnpm build"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+      "./http-counter": { "types": "./dist/http-counter.d.ts", "import": "./dist/http-counter.js" },
+      "./redis-counter": { "types": "./dist/redis-counter.d.ts", "import": "./dist/redis-counter.js" }
+    }
+  },
+  "devDependencies": {
+    "tsup": "^8.5.0"
   }
 }

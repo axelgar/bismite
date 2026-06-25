@@ -11,6 +11,14 @@ if (!access.allowed) return Response.json({ upgradeUrl: access.upgradeUrl }, { s
 await bismite.record(userId, "chat-message", { tokens });     // meter
 ```
 
+## Use it in your app
+
+```bash
+npm install bismite
+```
+
+→ **[QUICKSTART.md](QUICKSTART.md)** — gated feature in 5 minutes, standalone (no clone). The rest of this README is for hacking on the monorepo itself.
+
 ## Monorepo
 
 | Path | What |
@@ -21,11 +29,12 @@ await bismite.record(userId, "chat-message", { tokens });     // meter
 | `examples/nextjs-chat/public/landing.html` | Marketing landing page (served at `/landing.html`); the waitlist form posts to `/api/waitlist` → Upstash |
 | `PRD.md`, `issues/` | Product doc and the build issues |
 
-## Quickstart
+## Hacking on the monorepo
 
 ```bash
 pnpm install
 pnpm test                                   # SDK + mapping unit tests
+pnpm build                                  # build the publishable SDK (dist/)
 pnpm counter                                # local counter (or set UPSTASH_* in the example's .env)
 pnpm --filter nextjs-chat dev               # the example app
 ```

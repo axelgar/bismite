@@ -1,9 +1,10 @@
 {
-  "name": "meter-sdk-monorepo",
+  "name": "bismite-monorepo",
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test packages/sdk/test/",
+    "test": "node --test packages/sdk/test/*.test.ts examples/nextjs-chat/test/*.test.ts",
+    "build": "pnpm --filter bismite build",
     "counter": "node services/counter/src/index.ts",
     "example": "pnpm --filter nextjs-chat dev"
   }
