@@ -1,6 +1,6 @@
 {
   "name": "bismite",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "SDK-first billing & entitlements runtime on Stripe — gate, meter, and monetize any feature in 3 lines, and it never takes your app down.",
   "type": "module",
   "license": "MIT",
@@ -12,6 +12,7 @@
   "files": ["dist", "README.md"],
   "exports": {
     ".": "./src/index.ts",
+    "./hosted": "./src/hosted.ts",
     "./http-counter": "./src/http-counter.ts",
     "./redis-counter": "./src/redis-counter.ts"
   },
@@ -22,6 +23,7 @@
   "publishConfig": {
     "exports": {
       ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+      "./hosted": { "types": "./dist/hosted.d.ts", "import": "./dist/hosted.js" },
       "./http-counter": { "types": "./dist/http-counter.d.ts", "import": "./dist/http-counter.js" },
       "./redis-counter": { "types": "./dist/redis-counter.d.ts", "import": "./dist/redis-counter.js" }
     }

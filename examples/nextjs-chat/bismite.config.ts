@@ -1,5 +1,5 @@
 import { Billing } from "bismite";
-import { httpCounter } from "bismite/http-counter";
+import { bismiteCounter } from "bismite/hosted";
 import { upstashCounter } from "bismite/redis-counter";
 import { getPlan } from "./lib/plan-store";
 import { plans, planForPrice, planForSubscription } from "./lib/plan-mapping";
@@ -7,12 +7,19 @@ import { plans, planForPrice, planForSubscription } from "./lib/plan-mapping";
 // Re-export the plan map + pure mappers so routes import from one place.
 export { plans, planForPrice, planForSubscription };
 
-// Use the production-grade Upstash counter when configured (concurrency-correct,
-// period-scoped); fall back to the local counter service for a zero-setup demo.
+// Lead with the hosted counter: one API key, no second vendor. The dev seed key +
+// local service URL make the demo run with zero config. BYO-Upstash is the
+// no-lock-in escape hatch — opt in explicitly with BISMITE_COUNTER=upstash. (Mere
+// presence of UPSTASH_* can't mean "counter" — the app uses it for plan state too.)
 const counter =
-  process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
+  process.env.BISMITE_COUNTER === "upstash" &&
+  process.env.UPSTASH_REDIS_REST_URL &&
+  process.env.UPSTASH_REDIS_REST_TOKEN
     ? upstashCounter(process.env.UPSTASH_REDIS_REST_URL, process.env.UPSTASH_REDIS_REST_TOKEN)
-    : httpCounter(process.env.COUNTER_URL ?? "http://localhost:4000");
+    : bismiteCounter(
+        process.env.BISMITE_API_KEY ?? "bsk_test_dev",
+        process.env.BISMITE_API_URL ?? "http://localhost:4000",
+      );
 
 export const bismite = new Billing({
   plans,
