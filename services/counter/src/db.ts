@@ -3,7 +3,7 @@
 // cached in-process so the hot path rarely touches the DB (PRD §6, §7).
 import { randomBytes, createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { apiKeys, projects } from "./schema.js";
 
 export type Mode = "test" | "live";
@@ -25,6 +25,10 @@ const secret = (mode: Mode) => `bsk_${mode}_${randomBytes(24).toString("base64ur
 // Cross-instance invalidation (regenerate on instance A) is bounded by TTL; swap in
 // shared Redis if that staleness window ever matters.
 const TTL_MS = 30_000;
+// Unknown keys get a much shorter negative cache: still absorbs bad-key/abuse
+// floods, but a just-minted key resolves within seconds instead of being shadowed
+// as "missing" for the full hit-TTL.
+const NEG_TTL_MS = 5_000;
 
 /** Neon (DATABASE_URL) for deploys, else PGlite in-memory for zero-config local dev
  *  + tests — both run the exact same Drizzle queries and migration files. */
@@ -64,7 +68,7 @@ export function makeControlPlane(env: Record<string, string | undefined>): Contr
         .where(eq(apiKeys.hashedKey, h))
         .limit(1);
       const val = row ? { projectId: row.projectId, mode: row.mode as Mode } : null;
-      cache.set(h, { val, exp: Date.now() + TTL_MS });
+      cache.set(h, { val, exp: Date.now() + (val ? TTL_MS : NEG_TTL_MS) });
       // Best-effort, fire-and-forget — never block resolution on the usage stamp.
       if (val) d.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.hashedKey, h)).catch(() => {});
       return val;
@@ -86,8 +90,18 @@ export function makeControlPlane(env: Record<string, string | undefined>): Contr
     async regenerate(projectId, mode) {
       const d = await db();
       const key = secret(mode);
-      await d.delete(apiKeys).where(and(eq(apiKeys.projectId, projectId), eq(apiKeys.mode, mode)));
-      await d.insert(apiKeys).values({ id: id("key"), projectId, hashedKey: hash(key), mode });
+      const hashed = hash(key);
+      // Single atomic upsert on the (project_id, mode) unique constraint — replaces
+      // the mode's key in one statement, so there's no window where the project is
+      // keyless. (A delete+insert isn't atomic, and the neon-http prod driver has no
+      // transactions, so the upsert is the right tool here.)
+      await d
+        .insert(apiKeys)
+        .values({ id: id("key"), projectId, hashedKey: hashed, mode })
+        .onConflictDoUpdate({
+          target: [apiKeys.projectId, apiKeys.mode],
+          set: { hashedKey: hashed, createdAt: new Date(), lastUsedAt: null },
+        });
       cache.clear(); // rare op — drop the whole cache so the old key stops resolving now
       return key;
     },
