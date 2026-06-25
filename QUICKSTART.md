@@ -86,6 +86,24 @@ export async function POST(req: Request) {
 That's a working gate + meter. Free users get 20/day, then a `402` with an
 upgrade URL. **Done with the SDK part.**
 
+### Metering tokens instead of calls
+
+For AI features the limit is usually tokens, not requests. Add `unit: "tokens"`
+to the rule and record the real usage after the call returns:
+
+```ts
+// plan: { limit: 50_000, period: "day", unit: "tokens" }
+const access = await bismite.check(userId, "chat-message"); // gate on tokens-so-far
+if (!access.allowed) return Response.json({ upgradeUrl: access.upgradeUrl }, { status: 402 });
+
+const completion = await openai.chat.completions.create({ /* ... */ });
+
+await bismite.record(userId, "chat-message", { tokens: completion.usage.total_tokens });
+```
+
+`remaining` is then tokens left this period. `check()` runs before the call (you
+don't yet know its cost), so you gate on usage-so-far and meter the actual after.
+
 ## 5. The upgrade loop (Stripe) — optional next step
 
 To make the paywall actually take money, wire three things:

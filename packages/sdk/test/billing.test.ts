@@ -65,6 +65,33 @@ test("unlimited plan is always allowed without touching the meter", async () => 
   assert.equal(c.remaining, Infinity);
 });
 
+test("token-metered feature counts tokens, not calls", async () => {
+  const tokenPlans = {
+    free: { features: { "chat-message": { limit: 1000, period: "day" as const, unit: "tokens" as const } } },
+  };
+  const billing = new Billing({
+    plans: tokenPlans, counter: memCounter(),
+    resolvePlan: () => "free", upgradeUrl: () => "/upgrade",
+  });
+
+  // One call spends 600 tokens — over half the budget in a single request.
+  await billing.record("u1", "chat-message", { tokens: 600 });
+  let c = await billing.check("u1", "chat-message");
+  assert.equal(c.allowed, true);
+  assert.equal(c.remaining, 400); // tokens, not "1 call used"
+
+  // Recording without { tokens } meters nothing on a token feature.
+  await billing.record("u1", "chat-message");
+  assert.equal((await billing.check("u1", "chat-message")).remaining, 400);
+
+  // Next call pushes past the limit -> blocked.
+  await billing.record("u1", "chat-message", { tokens: 500 });
+  c = await billing.check("u1", "chat-message");
+  assert.equal(c.allowed, false);
+  assert.equal(c.remaining, 0);
+  assert.equal(c.upgradeUrl, "/upgrade");
+});
+
 test("usage is bucketed per period (day vs month)", () => {
   const d = new Date("2026-06-22T10:00:00Z");
   assert.equal(periodKey("day", d), "2026-06-22");

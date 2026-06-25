@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bismite docs — gate, meter & monetize any feature</title>
+  <style>
+    :root { --bg:#0b0d12; --fg:#e8eaed; --muted:#9aa3b2; --accent:#7c9cff; --card:#13161d; --line:#222734; }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 system-ui, sans-serif; }
+    .layout { max-width: 980px; margin: 0 auto; padding: 0 24px; display: grid; grid-template-columns: 200px 1fr; gap: 48px; }
+    nav { position: sticky; top: 0; align-self: start; padding: 48px 0; height: 100vh; overflow:auto; }
+    nav .brand { font-weight:700; font-size:1.1rem; margin-bottom:6px; display:block; color:var(--fg); text-decoration:none; }
+    nav .brand .accent { color:var(--accent); }
+    nav .ver { font-size:12px; color:var(--muted); margin-bottom:24px; }
+    nav a { display:block; color:var(--muted); text-decoration:none; padding:6px 0; font-size:14px; border-left:2px solid transparent; padding-left:12px; margin-left:-14px; }
+    nav a:hover { color:var(--fg); }
+    nav a.sub { padding-left:26px; font-size:13px; }
+    nav .back { margin-top:24px; color:var(--accent); font-size:13px; }
+    main { padding: 48px 0 120px; min-width:0; }
+    h1 { font-size: 2.2rem; line-height:1.15; margin:0 0 8px; letter-spacing:-0.02em; }
+    h1 .accent { color: var(--accent); }
+    .sub { font-size:1.15rem; color:var(--muted); margin:0 0 8px; }
+    .lead { color:var(--muted); margin:0 0 40px; }
+    h2 { font-size:1.5rem; margin:56px 0 12px; letter-spacing:-0.01em; padding-top:8px; }
+    h3 { font-size:1.1rem; margin:32px 0 8px; }
+    p { color:#c9cfdb; }
+    a { color: var(--accent); }
+    pre { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; overflow:auto; font-size:13px; }
+    code { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+    p code, li code, td code { background:var(--card); border:1px solid var(--line); border-radius:6px; padding:1px 6px; font-size:13px; }
+    .c { color:#7f8694; } .k { color:#7c9cff; } .s { color:#9ece6a; } .m { color:#e0af68; } .t { color:#79c0ff; }
+    table { border-collapse: collapse; width:100%; margin:12px 0; font-size:14px; }
+    th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+    th { color:var(--muted); font-weight:600; }
+    .note { background:var(--card); border:1px solid var(--line); border-left:3px solid var(--accent); border-radius:8px; padding:14px 18px; margin:20px 0; color:#c9cfdb; }
+    .tag { display:inline-block; font-size:12px; color:var(--accent); border:1px solid var(--line); border-radius:999px; padding:4px 12px; margin-bottom:20px; }
+    @media (max-width: 720px) {
+      .layout { grid-template-columns: 1fr; gap:0; }
+      nav { position:static; height:auto; padding:32px 0 0; }
+      nav a { display:inline-block; margin-right:12px; border-left:0; padding-left:0; margin-left:0; }
+      nav a.sub { display:none; }
+      main { padding-top:24px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <nav>
+      <a class="brand" href="/landing.html">bis<span class="accent">mite</span></a>
+      <div class="ver">SDK reference · v0.2</div>
+      <a href="#install">Install</a>
+      <a href="#quickstart">Quickstart</a>
+      <a href="#units">Units: count vs tokens</a>
+      <a href="#api">API reference</a>
+      <a class="sub" href="#check">check()</a>
+      <a class="sub" href="#record">record()</a>
+      <a class="sub" href="#config">Billing config</a>
+      <a class="sub" href="#counters">Counters</a>
+      <a href="#stripe">Stripe upgrade loop</a>
+      <a href="#failure">Failure modes</a>
+      <a class="back" href="/landing.html">← back to home</a>
+    </nav>
+
+    <main>
+      <span class="tag">SDK-first billing for AI apps</span>
+      <h1>Bismite <span class="accent">docs</span></h1>
+      <p class="sub">Gate, meter & monetize any feature in 3 lines — and it never takes your app down.</p>
+      <p class="lead">The billing runtime that lives in your code: on every request it answers <em>is this user allowed, and how much have they used?</em> — with the upgrade loop wired through Stripe.</p>
+
+      <h2 id="install">Install</h2>
+<pre><code>npm install bismite</code></pre>
+      <p>Zero dependencies, ESM, ships types. Node 18+ / any serverless runtime.</p>
+
+      <h2 id="quickstart">Quickstart</h2>
+      <p>Two calls around the work you want to meter. Define plans as code, then gate before and record after.</p>
+      <h3>1. Plans &amp; client — <code>bismite.config.ts</code></h3>
+<pre><code><span class="k">import</span> { Billing } <span class="k">from</span> <span class="s">"bismite"</span>;
+<span class="k">import</span> { upstashCounter } <span class="k">from</span> <span class="s">"bismite/redis-counter"</span>;
+
+<span class="c">// Per-feature limits. No dashboard, no deploy to change a number.</span>
+<span class="k">export const</span> plans = {
+  free: { features: { <span class="s">"chat-message"</span>: { limit: <span class="m">20</span>, period: <span class="s">"day"</span> } } },
+  pro:  { features: { <span class="s">"chat-message"</span>: <span class="s">"unlimited"</span> } },
+};
+
+<span class="k">export const</span> bismite = <span class="k">new</span> <span class="t">Billing</span>({
+  plans,
+  resolvePlan: (userId) => <span class="s">"free"</span>,           <span class="c">// real plan in step 4 (Stripe)</span>
+  counter: <span class="m">upstashCounter</span>(process.env.<span class="t">UPSTASH_REDIS_REST_URL</span>!, process.env.<span class="t">UPSTASH_REDIS_REST_TOKEN</span>!),
+  upgradeUrl: (userId) => <span class="s">`/api/checkout?userId=</span>${<span class="k">encodeURIComponent</span>(userId)}<span class="s">`</span>,
+});</code></pre>
+
+      <h3>2. Gate before, meter after</h3>
+<pre><code><span class="k">const</span> access = <span class="k">await</span> bismite.<span class="m">check</span>(userId, <span class="s">"chat-message"</span>);   <span class="c">// gate</span>
+<span class="k">if</span> (!access.allowed) {
+  <span class="k">return</span> Response.<span class="m">json</span>({ upgradeUrl: access.upgradeUrl }, { status: <span class="m">402</span> });
+}
+
+<span class="k">const</span> reply = <span class="k">await</span> <span class="m">callYourLLM</span>(message);                       <span class="c">// the thing that costs money</span>
+
+<span class="k">await</span> bismite.<span class="m">record</span>(userId, <span class="s">"chat-message"</span>, { count: <span class="m">1</span> });    <span class="c">// meter</span></code></pre>
+      <p>Free users get 20/day, then a <code>402</code> with an upgrade URL. That's a working gate + meter.</p>
+      <div class="note">The counter must be atomic and shared across instances — <a href="https://upstash.com">Upstash Redis</a> (free tier, REST API) is the zero-setup default. Any object with <code>read(key)</code> / <code>increment(key, n)</code> works; see <a href="#counters">Counters</a>.</div>
+
+      <h2 id="units">Units: count vs tokens</h2>
+      <p>A limit counts one of two things. The default counts <b>calls</b> — N requests per period. For AI features the limit is usually <b>tokens</b>: add <code>unit: "tokens"</code> and record the real usage after the call returns.</p>
+<pre><code><span class="c">// plan: each user gets 50k tokens/day on free</span>
+free: { features: { <span class="s">"chat-message"</span>: { limit: <span class="m">50_000</span>, period: <span class="s">"day"</span>, unit: <span class="s">"tokens"</span> } } }
+
+<span class="k">const</span> access = <span class="k">await</span> bismite.<span class="m">check</span>(userId, <span class="s">"chat-message"</span>);  <span class="c">// gate on tokens-so-far</span>
+<span class="k">if</span> (!access.allowed) <span class="k">return</span> Response.<span class="m">json</span>({ upgradeUrl: access.upgradeUrl }, { status: <span class="m">402</span> });
+
+<span class="k">const</span> completion = <span class="k">await</span> openai.chat.completions.<span class="m">create</span>({ <span class="c">/* ... */</span> });
+
+<span class="k">await</span> bismite.<span class="m">record</span>(userId, <span class="s">"chat-message"</span>, { tokens: completion.usage.total_tokens });</code></pre>
+      <p><code>check()</code> runs <em>before</em> the call, when the token cost is still unknown — so you gate on usage-so-far and meter the actual after. <code>remaining</code> is expressed in the rule's unit (tokens here, calls otherwise). A token feature recorded without <code>{ tokens }</code> meters nothing.</p>
+
+      <h2 id="api">API reference</h2>
+
+      <h3 id="check"><code>check(userId, feature) → Promise&lt;CheckResult&gt;</code></h3>
+      <p>Gate a feature <b>before</b> the expensive work. Never throws.</p>
+      <table>
+        <tr><th>Field</th><th>Type</th><th>Meaning</th></tr>
+        <tr><td><code>allowed</code></td><td><code>boolean</code></td><td>Whether the user may proceed.</td></tr>
+        <tr><td><code>remaining</code></td><td><code>number</code></td><td>Units left this period (<code>Infinity</code> if unlimited; <code>-1</code> when the meter is down and the feature fails open).</td></tr>
+        <tr><td><code>upgradeUrl</code></td><td><code>string | null</code></td><td>Where to send a blocked user. <code>null</code> when allowed.</td></tr>
+      </table>
+
+      <h3 id="record"><code>record(userId, feature, usage?) → Promise&lt;void&gt;</code></h3>
+      <p>Meter usage <b>after</b> the work (token counts are only known once the call returns). Never throws — a failed record is swallowed so it can't break the caller.</p>
+      <table>
+        <tr><th>Param</th><th>Type</th><th>Meaning</th></tr>
+        <tr><td><code>usage.count</code></td><td><code>number</code></td><td>Increment for <code>count</code> features. Defaults to <code>1</code>.</td></tr>
+        <tr><td><code>usage.tokens</code></td><td><code>number</code></td><td>Increment for <code>tokens</code> features. Defaults to <code>0</code> (no-op).</td></tr>
+      </table>
+
+      <h3 id="config">Billing config</h3>
+      <p>Passed to <code>new Billing({ ... })</code>.</p>
+      <table>
+        <tr><th>Field</th><th>Type</th><th>Meaning</th></tr>
+        <tr><td><code>plans</code></td><td><code>Record&lt;string, Plan&gt;</code></td><td>Plan → feature → rule. A rule is <code>{ limit, period, unit?, failClosed? }</code> or <code>"unlimited"</code>.</td></tr>
+        <tr><td><code>resolvePlan</code></td><td><code>(userId) =&gt; string</code></td><td>The user's current plan name. Sync or async. In production this reads the plan your Stripe webhook wrote.</td></tr>
+        <tr><td><code>counter</code></td><td><code>CounterClient</code></td><td>The usage meter backend (see below).</td></tr>
+        <tr><td><code>upgradeUrl</code></td><td><code>(userId, feature) =&gt; string</code></td><td>Optional. URL returned on a blocked <code>check()</code>.</td></tr>
+      </table>
+      <h4 style="margin:20px 0 6px;color:var(--muted);font-size:14px;">FeatureRule</h4>
+      <table>
+        <tr><th>Field</th><th>Type</th><th>Meaning</th></tr>
+        <tr><td><code>limit</code></td><td><code>number</code></td><td>Allowance per period, in the rule's unit.</td></tr>
+        <tr><td><code>period</code></td><td><code>"day" | "month"</code></td><td>When the counter resets (UTC boundary, no cron).</td></tr>
+        <tr><td><code>unit</code></td><td><code>"count" | "tokens"</code></td><td>Optional. What the limit counts. Defaults to <code>"count"</code>.</td></tr>
+        <tr><td><code>failClosed</code></td><td><code>boolean</code></td><td>Optional. Block when the meter is unreachable instead of failing open. See <a href="#failure">Failure modes</a>.</td></tr>
+      </table>
+
+      <h3 id="counters">Counters</h3>
+      <p>The meter is a two-method interface — bring your own backend, or use a built-in.</p>
+<pre><code><span class="k">import</span> { upstashCounter } <span class="k">from</span> <span class="s">"bismite/redis-counter"</span>;  <span class="c">// atomic, cross-instance (recommended)</span>
+<span class="k">import</span> { httpCounter }    <span class="k">from</span> <span class="s">"bismite/http-counter"</span>;   <span class="c">// point at your own service</span>
+
+<span class="c">// or any object shaped like this:</span>
+<span class="k">interface</span> <span class="t">CounterClient</span> {
+  <span class="m">read</span>(key: <span class="t">string</span>): <span class="t">Promise</span>&lt;<span class="t">number</span>&gt;;
+  <span class="m">increment</span>(key: <span class="t">string</span>, amount: <span class="t">number</span>): <span class="t">Promise</span>&lt;<span class="t">void</span>&gt;;
+}</code></pre>
+      <p><code>upstashCounter</code> uses atomic <code>INCRBY</code> so concurrent records never lose or double-count; keys are period-scoped and expire automatically.</p>
+
+      <h2 id="stripe">Stripe upgrade loop</h2>
+      <p>To make the paywall take money, wire three things so an upgrade flips the plan with no deploy:</p>
+      <ol>
+        <li><b><code>/api/checkout</code></b> — create a Stripe Checkout Session with <code>client_reference_id = userId</code>, redirect to it.</li>
+        <li><b><code>/api/stripe/webhook</code></b> — on <code>checkout.session.completed</code> and <code>customer.subscription.*</code>, write the user's new plan to a store that <code>resolvePlan</code> reads.</li>
+        <li><b>Reconciliation</b> — re-pull the plan from Stripe on demand, so a missed webhook never locks out a paying customer.</li>
+      </ol>
+      <p>All three are implemented and live-verified in the <a href="https://github.com/axelgar/bismite/tree/main/examples/nextjs-chat">Next.js example</a>.</p>
+
+      <h2 id="failure">Failure modes, on purpose</h2>
+      <table>
+        <tr><th>Situation</th><th>What happens</th></tr>
+        <tr><td>Counter unreachable</td><td><b>Fail open</b> — users pass, you eat a small usage leak instead of an outage. This is the product promise.</td></tr>
+        <tr><td>Expensive feature, strict enforcement needed</td><td>Set <code>failClosed: true</code> on that one rule — it blocks when the meter is down.</td></tr>
+        <tr><td>Missed Stripe webhook</td><td>Run reconciliation; the plan re-syncs from Stripe.</td></tr>
+        <tr><td>New billing period</td><td>Counters are period-scoped, so the limit resets cleanly on the boundary — no cron.</td></tr>
+      </table>
+
+      <p style="margin-top:48px;color:var(--muted);font-size:14px;"><code>npm install bismite</code> · <a href="https://github.com/axelgar/bismite">GitHub</a> · <a href="/landing.html">Home</a></p>
+    </main>
+  </div>
+</body>
+</html>

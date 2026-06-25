@@ -40,10 +40,14 @@ You can build the naive version in an afternoon. The part that gets worse over t
 ```ts
 // bismite.config.ts — plans as code
 export const plans = {
-  free: { features: { "chat-message": { limit: 20, period: "day" } } },
+  // unit: "tokens" meters actual token usage — each call spends a variable
+  // amount (the AI wedge). Omit `unit` to count calls: { limit: 20, period: "day" }.
+  free: { features: { "chat-message": { limit: 50_000, period: "day", unit: "tokens" } } },
   pro:  { features: { "chat-message": "unlimited" } },
 };
 ```
+
+Check before the call (you don't know the token cost yet), record the actual usage after — `remaining` is in the rule's unit (tokens here, calls otherwise).
 
 ## How it works
 

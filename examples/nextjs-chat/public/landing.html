@@ -24,10 +24,23 @@
     button:disabled { opacity:.6; cursor:default; }
     .foot { color:var(--muted); font-size:13px; margin-top:14px; }
     .tag { display:inline-block; font-size:12px; color:var(--accent); border:1px solid var(--line); border-radius:999px; padding:4px 12px; margin-bottom:24px; }
+    .topnav { display:flex; justify-content:space-between; align-items:center; margin-bottom:48px; }
+    .topnav .brand { font-weight:700; font-size:1.05rem; text-decoration:none; color:var(--fg); }
+    .topnav .brand .accent { color:var(--accent); }
+    .topnav .links a { color:var(--muted); text-decoration:none; margin-left:20px; font-size:14px; }
+    .topnav .links a:hover { color:var(--fg); }
   </style>
 </head>
 <body>
   <div class="wrap">
+    <div class="topnav">
+      <a class="brand" href="/landing.html">bis<span class="accent">mite</span></a>
+      <div class="links">
+        <a href="/docs.html">Docs</a>
+        <a href="https://github.com/axelgar/bismite">GitHub</a>
+        <a href="https://www.npmjs.com/package/bismite">npm</a>
+      </div>
+    </div>
     <span class="tag">SDK-first billing for AI apps</span>
     <h1>Gate, meter & monetize any feature in <span class="accent">3 lines</span>.</h1>
     <p class="sub">Bismite is the billing runtime that lives in your code — and <b>never takes your app down</b>.</p>

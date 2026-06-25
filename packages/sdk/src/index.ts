@@ -6,11 +6,17 @@
 export type Usage = { tokens?: number; count?: number };
 export type CheckResult = { allowed: boolean; remaining: number; upgradeUrl: string | null };
 export type Period = "day" | "month";
+// What the limit counts. "count" (default) = one per call — N requests/day.
+// "tokens" = sum of token usage — the AI wedge, where each call costs a variable
+// amount. `limit`/`remaining` are expressed in this unit either way.
+export type Unit = "count" | "tokens";
 // failClosed: block when the meter is unreachable instead of failing open.
 // Default (omitted) is fail-open — the product promise. Opt into failClosed for
 // features that cost YOU a lot per call (e.g. an expensive model) and where a
 // brief block is cheaper than a usage leak.
-export type FeatureRule = { limit: number; period: Period; failClosed?: boolean } | "unlimited";
+export type FeatureRule =
+  | { limit: number; period: Period; unit?: Unit; failClosed?: boolean }
+  | "unlimited";
 export type Plan = { features: Record<string, FeatureRule> };
 
 /** The usage meter backend. HTTP-backed in prod (see ./http-counter); a seam so
@@ -79,9 +85,12 @@ export class Billing {
   async record(userId: string, feature: string, usage: Usage = {}): Promise<void> {
     const rule = await this.ruleFor(userId, feature);
     if (rule === undefined || rule === "unlimited") return;
-    // ponytail: count-based for slice 1 (20 messages/day). Token-based metering
-    // lands with the counter hardening in issue #4.
-    const amount = usage.count ?? 1;
+    // Meter in the rule's unit: token features count actual tokens (known only
+    // after the call returns), everything else counts one per call. A token
+    // feature recorded without { tokens } — or any non-positive amount — meters
+    // nothing rather than wasting a counter round-trip.
+    const amount = rule.unit === "tokens" ? (usage.tokens ?? 0) : (usage.count ?? 1);
+    if (amount <= 0) return;
     try {
       await this.#config.counter.increment(`${userId}:${feature}:${periodKey(rule.period)}`, amount);
     } catch {
