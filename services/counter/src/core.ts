@@ -3,6 +3,7 @@
 // testable without booting a server and reusable by the local server + Vercel fn.
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ControlPlane, Mode } from "./db.js";
+import { meter, summary, rateLimited } from "./metering.js";
 
 /** Tenant + mode namespace: a key from project A can never read/write project B's
  *  counts, and a project's `test` traffic is isolated from its `live` counts. */
@@ -12,8 +13,16 @@ export function nsKey(proj: string, mode: Mode, key: string): string {
 
 export interface Store {
   read(key: string): Promise<number>;
-  increment(key: string, amount: number): Promise<number>;
+  /** INCRBY + (re)set a bounded TTL so period/window buckets self-clean. */
+  increment(key: string, amount: number, ttlSeconds?: number): Promise<number>;
+  /** SADD a member to a set (for distinct-user / MTU counting) + bound its TTL. */
+  addMember(key: string, member: string, ttlSeconds?: number): Promise<void>;
+  /** SCARD — set cardinality (e.g. distinct MTU users this period). */
+  setSize(key: string): Promise<number>;
 }
+
+// ~40-day TTL: outlives a calendar-month bucket, then the key self-deletes.
+const MONTH_TTL = 60 * 60 * 24 * 40;
 
 /** Bearer token off a request, or null. Used for both API keys and the admin token. */
 function bearer(authHeader: string | undefined): string | null {
@@ -54,7 +63,7 @@ async function readJson(req: IncomingMessage): Promise<any> {
  *  Paths are matched by suffix so it works whether the host serves `/v1/usage` or
  *  rewrites it under `/api`. `adminToken` guards key issuance (unset => open, for
  *  local dev; the dashboard + better-auth own real issuance authz in hosted #4). */
-export function createHandler(cp: ControlPlane, store: Store, adminToken?: string) {
+export function createHandler(cp: ControlPlane, store: Store, adminToken?: string, rateLimitPerMin = 0) {
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const json = (code: number, body: unknown) => {
       res.writeHead(code, { "content-type": "application/json" });
@@ -103,6 +112,27 @@ export function createHandler(cp: ControlPlane, store: Store, adminToken?: strin
       if (!resolved) return json(401, { error: "invalid api key" });
       const { projectId, mode } = resolved;
 
+      // Billing meters (MTU + calls) for one counter op. Awaited but never allowed to
+      // fail the request — a metering blip must not take the hot path down. Awaiting
+      // (vs fire-and-forget) so serverless doesn't kill the writes after we respond.
+      const recordUsage = async (key: string) => {
+        try {
+          await meter(store, projectId, mode, key);
+        } catch (e) {
+          console.error("meter error:", e);
+        }
+      };
+
+      // Per-project rate limit on the counter hot path (not the dashboard summary).
+      const isCounterCall = path.endsWith("/v1/usage/increment") || path.endsWith("/v1/usage");
+      if (isCounterCall && (await rateLimited(store, projectId, rateLimitPerMin))) {
+        return json(429, { error: "rate limit exceeded" });
+      }
+
+      if (req.method === "GET" && path.endsWith("/v1/usage/summary")) {
+        return json(200, await summary(store, projectId));
+      }
+
       if (req.method === "POST" && path.endsWith("/v1/usage/increment")) {
         const b = await body();
         if (!b.ok) return;
@@ -111,13 +141,17 @@ export function createHandler(cp: ControlPlane, store: Store, adminToken?: strin
         if (typeof amount !== "number" || !Number.isFinite(amount)) {
           return json(400, { error: "invalid amount" });
         }
-        return json(200, { used: await store.increment(nsKey(projectId, mode, key), amount) });
+        const used = await store.increment(nsKey(projectId, mode, key), amount);
+        await recordUsage(key);
+        return json(200, { used });
       }
 
       if (req.method === "GET" && path.endsWith("/v1/usage")) {
         const key = url.searchParams.get("key");
         if (!key) return json(400, { error: "missing key" });
-        return json(200, { used: await store.read(nsKey(projectId, mode, key)) });
+        const used = await store.read(nsKey(projectId, mode, key));
+        await recordUsage(key);
+        return json(200, { used });
       }
 
       res.writeHead(404);
@@ -136,7 +170,9 @@ export function makeStore(env: Record<string, string | undefined>): Store {
   const url = env.UPSTASH_REDIS_REST_URL;
   const token = env.UPSTASH_REDIS_REST_TOKEN;
   if (!url || !token) {
+    // TTLs are no-ops in memory (single dev process; buckets just live until exit).
     const m = new Map<string, number>();
+    const sets = new Map<string, Set<string>>();
     return {
       async read(k) {
         return m.get(k) ?? 0;
@@ -146,23 +182,40 @@ export function makeStore(env: Record<string, string | undefined>): Store {
         m.set(k, v);
         return v;
       },
+      async addMember(k, member) {
+        let set = sets.get(k);
+        if (!set) sets.set(k, (set = new Set()));
+        set.add(member);
+      },
+      async setSize(k) {
+        return sets.get(k)?.size ?? 0;
+      },
     };
   }
-  const ttl = 60 * 60 * 24 * 40;
   const cmd = async (parts: (string | number)[]): Promise<unknown> => {
     const path = parts.map((p) => encodeURIComponent(String(p))).join("/");
     const r = await fetch(`${url}/${path}`, { headers: { authorization: `Bearer ${token}` } });
     if (!r.ok) throw new Error(`upstash ${r.status}`);
     return ((await r.json()) as { result: unknown }).result;
   };
+  // ponytail: INCRBY+EXPIRE (and SADD+EXPIRE) are 2 REST calls each — the hot path
+  // now runs a handful per request. Batch via Upstash pipeline / EXPIRE NX if the
+  // Redis op count ever shows up on the bill.
   return {
     async read(k) {
       return Number((await cmd(["GET", k])) ?? 0);
     },
-    async increment(k, amount) {
+    async increment(k, amount, ttl = MONTH_TTL) {
       const v = Number(await cmd(["INCRBY", k, amount]));
       await cmd(["EXPIRE", k, ttl]); // bound storage; old period buckets self-delete
       return v;
+    },
+    async addMember(k, member, ttl = MONTH_TTL) {
+      await cmd(["SADD", k, member]);
+      await cmd(["EXPIRE", k, ttl]);
+    },
+    async setSize(k) {
+      return Number((await cmd(["SCARD", k])) ?? 0);
     },
   };
 }

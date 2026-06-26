@@ -8,7 +8,12 @@ import { makeControlPlane } from "./db.js";
 if (!process.env.DATABASE_URL && !process.env.PGLITE_DATA) {
   process.env.PGLITE_DATA = `${import.meta.dirname}/../.pglite`;
 }
-const handler = createHandler(makeControlPlane(process.env), makeStore(process.env), process.env.ADMIN_TOKEN);
+const handler = createHandler(
+  makeControlPlane(process.env),
+  makeStore(process.env),
+  process.env.ADMIN_TOKEN,
+  Number(process.env.RATE_LIMIT_PER_MIN ?? 6000), // per-project/min; 0 disables
+);
 
 const port = Number(process.env.PORT ?? 4000);
 createServer(handler).listen(port, () => console.log(`counter listening on :${port}`));

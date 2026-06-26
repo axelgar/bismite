@@ -104,6 +104,59 @@ const newKeyResp = await fetch(`${base}/v1/usage?key=${user}`, { headers: { auth
 assert.equal(newKeyResp.status, 200, "new key resolves");
 console.log("OK: regenerating a key invalidates the old one");
 
+// 6) Metering (hosted #3): MTU = distinct users, calls = billable ops, test-mode
+//    excluded. Fresh project so the numbers are exactly what this section drives.
+const m3 = await fetch(`${base}/v1/projects`, {
+  method: "POST",
+  headers: { ...admin, "content-type": "application/json" },
+  body: JSON.stringify({ name: "smoke-meter", owner: "ci" }),
+});
+const { test: m3Test, live: m3Live } = (await m3.json()) as { test: string; live: string };
+const m3LiveBilling = billing(m3Live);
+const m3TestBilling = billing(m3Test);
+// Two distinct live users, each: 1 check (read) + 1 record (increment) = 2 metered calls.
+for (const u of ["meter-a", "meter-b"]) {
+  await m3LiveBilling.check(u, "chat-message");
+  await m3LiveBilling.record(u, "chat-message");
+}
+// Test-mode user must NOT move either metric.
+await m3TestBilling.check("meter-c", "chat-message");
+await m3TestBilling.record("meter-c", "chat-message");
+
+const now = new Date();
+const expectedPeriod = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+const sumResp = await fetch(`${base}/v1/usage/summary`, { headers: { authorization: `Bearer ${m3Live}` } });
+assert.equal(sumResp.status, 200, "summary ok");
+const sum = (await sumResp.json()) as { mtu: number; calls: number; period: string };
+assert.equal(sum.mtu, 2, "MTU = 2 distinct live users (test user excluded)");
+assert.equal(sum.calls, 4, "calls = 2 users x (1 check + 1 record); test traffic excluded");
+assert.equal(sum.period, expectedPeriod, "summary scoped to the current UTC month");
+console.log("OK: /v1/usage/summary reports MTU + calls; test-mode excluded from billing");
+
+// 7) Per-project rate limit (hosted #3): over the cap => 429. Only asserted when the
+//    server is started with a small cap AND smoke is told the same value, e.g.:
+//    RATE_LIMIT_PER_MIN=20 pnpm counter   &&   RATE_LIMIT_PER_MIN=20 pnpm smoke
+const rlCap = Number(process.env.RATE_LIMIT_PER_MIN ?? 0);
+if (rlCap > 0 && rlCap <= 100) {
+  const m4 = await fetch(`${base}/v1/projects`, {
+    method: "POST",
+    headers: { ...admin, "content-type": "application/json" },
+    body: JSON.stringify({ name: "smoke-ratelimit", owner: "ci" }),
+  });
+  const rlAuth = { authorization: `Bearer ${((await m4.json()) as { live: string }).live}` };
+  const hit = () =>
+    fetch(`${base}/v1/usage?key=rl`, { headers: rlAuth }).then((r) => r.status);
+  // Burst well past the cap (2x + slack) so a per-minute boundary roll still overflows.
+  const codes = await Promise.all(Array.from({ length: rlCap * 2 + 5 }, hit));
+  // Concurrent burst: assert on aggregate, not order (index != arrival order).
+  assert.ok(codes.includes(200), "requests under the cap succeed");
+  assert.ok(codes.includes(429), "rate limit trips with 429 once the cap is exceeded");
+  assert.ok(codes.filter((c) => c === 200).length <= rlCap, "successes never exceed the cap");
+  console.log(`OK: per-project rate limit enforced (cap=${rlCap}/min, 429 over cap)`);
+} else {
+  console.log("SKIP: rate-limit 429 check (set RATE_LIMIT_PER_MIN<=100 on server + smoke to run it)");
+}
+
 // 5) Fail-open: counter unreachable => check() never blocks.
 const down = new Billing({
   plans: { free: { features: { "chat-message": { limit: 3, period: "day" } } } },
