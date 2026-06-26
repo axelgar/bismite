@@ -1,0 +1,28 @@
+{
+  "name": "dashboard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --port 3001",
+    "build": "next build",
+    "start": "next start --port 3001",
+    "auth:generate": "npx @better-auth/cli generate --config lib/auth.ts -y",
+    "db:generate": "drizzle-kit generate",
+    "db:setup": "node --env-file=.env.local scripts/setup-db.mjs"
+  },
+  "dependencies": {
+    "better-auth": "^1.6.21",
+    "drizzle-orm": "^0.38.3",
+    "@neondatabase/serverless": "^0.10.4",
+    "next": "^15.5.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "20.17.6",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.2",
+    "drizzle-kit": "^0.31.4",
+    "typescript": "5.8.2"
+  }
+}

@@ -3,10 +3,18 @@
 // cached in-process so the hot path rarely touches the DB (PRD §6, §7).
 import { randomBytes, createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { apiKeys, projects } from "./schema.js";
 
 export type Mode = "test" | "live";
+
+/** A project plus its per-mode key metadata, no secrets — the #4 dashboard read shape. */
+export interface ProjectView {
+  projectId: string;
+  name: string;
+  createdAt: Date;
+  keys: Array<{ mode: Mode; createdAt: Date; lastUsedAt: Date | null }>;
+}
 
 export interface ControlPlane {
   /** Bearer key -> {project, mode}, cached; null => unknown/revoked (=> 401). */
@@ -15,6 +23,9 @@ export interface ControlPlane {
   createProject(name: string, owner: string): Promise<{ projectId: string; test: string; live: string }>;
   /** Replace a project's key for one mode; old key stops resolving. Returns the new secret. */
   regenerate(projectId: string, mode: Mode): Promise<string>;
+  /** Projects owned by `owner` (+ key metadata, no secrets). The dashboard scopes
+   *  every view to the logged-in user via this — it's the per-user authz boundary. */
+  listProjects(owner: string): Promise<ProjectView[]>;
 }
 
 const hash = (key: string) => createHash("sha256").update(key).digest("hex");
@@ -104,6 +115,36 @@ export function makeControlPlane(env: Record<string, string | undefined>): Contr
         });
       cache.clear(); // rare op — drop the whole cache so the old key stops resolving now
       return key;
+    },
+
+    async listProjects(owner) {
+      const d = await db();
+      const projs = await d.select().from(projects).where(eq(projects.owner, owner));
+      if (projs.length === 0) return [];
+      // Two queries + group in JS — clearer than a join and the row counts are tiny
+      // (a dev's handful of projects, ≤2 keys each). Secrets are never selected.
+      const ids = projs.map((p) => p.id);
+      const keys = await d
+        .select({
+          projectId: apiKeys.projectId,
+          mode: apiKeys.mode,
+          createdAt: apiKeys.createdAt,
+          lastUsedAt: apiKeys.lastUsedAt,
+        })
+        .from(apiKeys)
+        .where(inArray(apiKeys.projectId, ids));
+      const byProj = new Map<string, ProjectView["keys"]>();
+      for (const k of keys) {
+        const list = byProj.get(k.projectId) ?? [];
+        list.push({ mode: k.mode as Mode, createdAt: k.createdAt, lastUsedAt: k.lastUsedAt });
+        byProj.set(k.projectId, list);
+      }
+      return projs.map((p) => ({
+        projectId: p.id,
+        name: p.name,
+        createdAt: p.createdAt,
+        keys: byProj.get(p.id) ?? [],
+      }));
     },
   };
 }

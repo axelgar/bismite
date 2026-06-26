@@ -106,6 +106,21 @@ export function createHandler(cp: ControlPlane, store: Store, adminToken?: strin
         return json(200, { key: await cp.regenerate(projectId, mode) });
       }
 
+      // Dashboard read path: a user's projects (+ key metadata, no secrets). The
+      // dashboard passes the logged-in user as ?owner, then scopes its whole UI to this.
+      if (req.method === "GET" && path.endsWith("/v1/projects")) {
+        if (!isAdmin) return json(401, { error: "admin only" });
+        return json(200, await cp.listProjects(url.searchParams.get("owner") ?? ""));
+      }
+
+      // Dashboard read path: usage by projectId behind the admin token. Keys are
+      // hashed at rest, so the dashboard can't auth as the project — it reads by id.
+      // (SDK callers hit the key-authed summary below and never pass ?projectId.)
+      if (req.method === "GET" && path.endsWith("/v1/usage/summary") && url.searchParams.has("projectId")) {
+        if (!isAdmin) return json(401, { error: "admin only" });
+        return json(200, await summary(store, url.searchParams.get("projectId")!));
+      }
+
       // --- Usage: authed by the project's API key -> {project, mode} or 401. ---
       const rawKey = bearer(req.headers.authorization);
       const resolved = rawKey ? await cp.resolveKey(rawKey) : null;

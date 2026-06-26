@@ -35,6 +35,29 @@ test("regenerate replaces the key for a mode and invalidates the old one", async
   assert.deepEqual(await cp.resolveKey(liveKey), { projectId, mode: "live" }, "live key untouched");
 });
 
+test("listProjects: scoped to owner, with per-mode key metadata and no secrets", async () => {
+  const owner = "owner-list-1";
+  const a = await cp.createProject("alpha", owner);
+  const b = await cp.createProject("beta", owner);
+  await cp.createProject("other", "someone-else"); // must not leak across owners
+
+  const list = await cp.listProjects(owner);
+  assert.equal(list.length, 2);
+  assert.deepEqual(new Set(list.map((p) => p.projectId)), new Set([a.projectId, b.projectId]));
+
+  const alpha = list.find((p) => p.projectId === a.projectId)!;
+  assert.deepEqual(
+    new Set(alpha.keys.map((k) => k.mode)),
+    new Set(["test", "live"]),
+    "both mode keys surfaced",
+  );
+  // No secret/hash fields ever escape the read shape.
+  assert.equal(JSON.stringify(list).includes("bsk_"), false);
+  assert.equal(JSON.stringify(list).includes("hashedKey"), false);
+
+  assert.deepEqual(await cp.listProjects("nobody"), [], "unknown owner => empty");
+});
+
 test("makeStore (memory): increment returns running total, read reflects it", async () => {
   const s = makeStore({}); // no UPSTASH_* => in-memory
   assert.equal(await s.read("k"), 0);
