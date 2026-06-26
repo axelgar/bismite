@@ -92,6 +92,24 @@ test("token-metered feature counts tokens, not calls", async () => {
   assert.equal(c.upgradeUrl, "/upgrade");
 });
 
+test("hosted over-limit signal surfaces on check, distinct from a fail-open transient", async () => {
+  // A hosted counter that's under the user's own limit but over the PROJECT's Bismite tier.
+  const overCounter: CounterClient = {
+    async read() { return { used: 0, overLimit: true }; },
+    async increment() {},
+  };
+  const billing = new Billing({
+    plans, counter: overCounter, resolvePlan: () => "free", upgradeUrl: () => "/upgrade",
+  });
+  const c = await billing.check("u1", "chat-message");
+  assert.equal(c.allowed, true, "never blocked on tier over-limit — fail-open promise holds");
+  assert.equal(c.overLimit, true, "but the upgrade signal is surfaced");
+
+  // A transient meter outage is NOT an over-limit signal.
+  const down = new Billing({ plans, counter: downCounter, resolvePlan: () => "free" });
+  assert.equal((await down.check("u1", "chat-message")).overLimit, false);
+});
+
 test("usage is bucketed per period (day vs month)", () => {
   const d = new Date("2026-06-22T10:00:00Z");
   assert.equal(periodKey("day", d), "2026-06-22");

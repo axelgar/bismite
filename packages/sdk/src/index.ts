@@ -4,7 +4,11 @@
 // meter fails OPEN (a reachable-but-down counter never blocks a user).
 
 export type Usage = { tokens?: number; count?: number };
-export type CheckResult = { allowed: boolean; remaining: number; upgradeUrl: string | null };
+// overLimit: the hosted counter signals the PROJECT is over its Bismite tier (MTU)
+// allowance — orthogonal to `allowed` (the dev's own plan rule for THIS user). It's
+// advisory: we never block on it (fail-open holds), the app just shows "upgrade your
+// Bismite plan". false on a fail-open transient, so it's distinct from a meter outage.
+export type CheckResult = { allowed: boolean; remaining: number; upgradeUrl: string | null; overLimit: boolean };
 export type Period = "day" | "month";
 // What the limit counts. "count" (default) = one per call — N requests/day.
 // "tokens" = sum of token usage — the AI wedge, where each call costs a variable
@@ -22,7 +26,9 @@ export type Plan = { features: Record<string, FeatureRule> };
 /** The usage meter backend. HTTP-backed in prod (see ./http-counter); a seam so
  *  issue #4 can swap in a concurrency-correct store without touching the runtime. */
 export interface CounterClient {
-  read(key: string): Promise<number>;
+  // A bare number is the used count. The hosted counter returns the count plus an
+  // `overLimit` tier flag; other backends just return the number (overLimit => false).
+  read(key: string): Promise<number | { used: number; overLimit?: boolean }>;
   increment(key: string, amount: number): Promise<void>;
 }
 
@@ -59,18 +65,26 @@ export class Billing {
     const rule = await this.ruleFor(userId, feature);
     // Unknown feature or unlimited plan => allowed, no meter read needed.
     if (rule === undefined || rule === "unlimited") {
-      return { allowed: true, remaining: Infinity, upgradeUrl: null };
+      return { allowed: true, remaining: Infinity, upgradeUrl: null, overLimit: false };
     }
     let used: number;
+    let overLimit = false;
     try {
-      used = await this.#config.counter.read(`${userId}:${feature}:${periodKey(rule.period)}`);
+      const r = await this.#config.counter.read(`${userId}:${feature}:${periodKey(rule.period)}`);
+      if (typeof r === "number") {
+        used = r;
+      } else {
+        used = r.used;
+        overLimit = !!r.overLimit;
+      }
     } catch {
       if (rule.failClosed) {
         // Opted-in strict mode: block when the meter is unreachable.
-        return { allowed: false, remaining: 0, upgradeUrl: this.#config.upgradeUrl?.(userId, feature) ?? null };
+        return { allowed: false, remaining: 0, upgradeUrl: this.#config.upgradeUrl?.(userId, feature) ?? null, overLimit: false };
       }
       // FAIL-OPEN (default): meter unreachable => never block the customer's app.
-      return { allowed: true, remaining: -1, upgradeUrl: null };
+      // overLimit stays false — a transient outage is not an over-limit signal.
+      return { allowed: true, remaining: -1, upgradeUrl: null, overLimit: false };
     }
     const remaining = Math.max(0, rule.limit - used);
     const allowed = used < rule.limit;
@@ -78,6 +92,7 @@ export class Billing {
       allowed,
       remaining,
       upgradeUrl: allowed ? null : (this.#config.upgradeUrl?.(userId, feature) ?? null),
+      overLimit,
     };
   }
 

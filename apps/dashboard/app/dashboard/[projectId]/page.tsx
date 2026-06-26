@@ -2,8 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import { ownedProject, usageSummary, type Mode } from "@/lib/counter";
-import { FREE_PLAN } from "@/lib/plans";
+import { planFor } from "@/lib/plans";
 import { Regenerate } from "./regenerate";
+import { PlanSelect } from "./plan-select";
 
 function Meter({ label, used, limit }: { label: string; used: number; limit: number }) {
   const pct = Math.min(100, Math.round((used / limit) * 100));
@@ -30,6 +31,7 @@ export default async function ProjectDetail({ params }: { params: Promise<{ proj
   const project = await ownedProject(user.id, projectId);
   if (!project) notFound();
   const usage = await usageSummary(projectId);
+  const plan = planFor(project.plan);
 
   const keyByMode = new Map(project.keys.map((k) => [k.mode, k]));
 
@@ -43,9 +45,13 @@ export default async function ProjectDetail({ params }: { params: Promise<{ proj
 
       <h2>Usage · {usage.period}</h2>
       <div className="card">
-        <Meter label="Monthly Tracked Users" used={usage.mtu} limit={FREE_PLAN.mtu} />
-        <Meter label="Calls" used={usage.calls} limit={FREE_PLAN.calls} />
-        <p className="muted">Live-mode only · {FREE_PLAN.name} plan · test traffic isn't metered.</p>
+        <PlanSelect projectId={projectId} plan={plan.id} />
+        <Meter label="Monthly Tracked Users" used={usage.mtu} limit={plan.mtu} />
+        <Meter label="Calls" used={usage.calls} limit={plan.calls} />
+        <p className="muted">
+          Live-mode only · {plan.name} plan · MTU is the headline limit (over it shows
+          “upgrade”); calls are a guardrail. Test traffic isn’t metered.
+        </p>
       </div>
 
       <h2>API keys</h2>

@@ -5,6 +5,7 @@ import { randomBytes, createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { eq, inArray } from "drizzle-orm";
 import { apiKeys, projects } from "./schema.js";
+import type { PlanId } from "./plans.js";
 
 export type Mode = "test" | "live";
 
@@ -12,17 +13,21 @@ export type Mode = "test" | "live";
 export interface ProjectView {
   projectId: string;
   name: string;
+  plan: PlanId;
   createdAt: Date;
   keys: Array<{ mode: Mode; createdAt: Date; lastUsedAt: Date | null }>;
 }
 
 export interface ControlPlane {
-  /** Bearer key -> {project, mode}, cached; null => unknown/revoked (=> 401). */
-  resolveKey(rawKey: string): Promise<{ projectId: string; mode: Mode } | null>;
+  /** Bearer key -> {project, mode, plan}, cached; null => unknown/revoked (=> 401).
+   *  Plan rides along so the hot path can enforce tier limits without a second lookup. */
+  resolveKey(rawKey: string): Promise<{ projectId: string; mode: Mode; plan: PlanId } | null>;
   /** Create a project and mint both keys. Secrets are returned ONCE, here only. */
   createProject(name: string, owner: string): Promise<{ projectId: string; test: string; live: string }>;
   /** Replace a project's key for one mode; old key stops resolving. Returns the new secret. */
   regenerate(projectId: string, mode: Mode): Promise<string>;
+  /** Set a project's billing tier; the hot path picks it up on the next resolve. */
+  setPlan(projectId: string, plan: PlanId): Promise<void>;
   /** Projects owned by `owner` (+ key metadata, no secrets). The dashboard scopes
    *  every view to the logged-in user via this — it's the per-user authz boundary. */
   listProjects(owner: string): Promise<ProjectView[]>;
@@ -65,7 +70,7 @@ export function makeControlPlane(env: Record<string, string | undefined>): Contr
       return d;
     })());
 
-  const cache = new Map<string, { val: { projectId: string; mode: Mode } | null; exp: number }>();
+  const cache = new Map<string, { val: { projectId: string; mode: Mode; plan: PlanId } | null; exp: number }>();
 
   return {
     async resolveKey(rawKey) {
@@ -73,12 +78,14 @@ export function makeControlPlane(env: Record<string, string | undefined>): Contr
       const hit = cache.get(h);
       if (hit && hit.exp > Date.now()) return hit.val; // hot path: no DB, no last_used write
       const d = await db();
+      // Join the project so the tier rides along with the key — one lookup, then cached.
       const [row] = await d
-        .select({ projectId: apiKeys.projectId, mode: apiKeys.mode })
+        .select({ projectId: apiKeys.projectId, mode: apiKeys.mode, plan: projects.plan })
         .from(apiKeys)
+        .innerJoin(projects, eq(apiKeys.projectId, projects.id))
         .where(eq(apiKeys.hashedKey, h))
         .limit(1);
-      const val = row ? { projectId: row.projectId, mode: row.mode as Mode } : null;
+      const val = row ? { projectId: row.projectId, mode: row.mode as Mode, plan: row.plan as PlanId } : null;
       cache.set(h, { val, exp: Date.now() + (val ? TTL_MS : NEG_TTL_MS) });
       // Best-effort, fire-and-forget — never block resolution on the usage stamp.
       if (val) d.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.hashedKey, h)).catch(() => {});
@@ -117,6 +124,12 @@ export function makeControlPlane(env: Record<string, string | undefined>): Contr
       return key;
     },
 
+    async setPlan(projectId, plan) {
+      const d = await db();
+      await d.update(projects).set({ plan }).where(eq(projects.id, projectId));
+      cache.clear(); // rare op — drop the cache so the hot path enforces the new tier now
+    },
+
     async listProjects(owner) {
       const d = await db();
       const projs = await d.select().from(projects).where(eq(projects.owner, owner));
@@ -142,6 +155,7 @@ export function makeControlPlane(env: Record<string, string | undefined>): Contr
       return projs.map((p) => ({
         projectId: p.id,
         name: p.name,
+        plan: p.plan as PlanId,
         createdAt: p.createdAt,
         keys: byProj.get(p.id) ?? [],
       }));

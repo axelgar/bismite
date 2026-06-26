@@ -1,6 +1,6 @@
 {
   "name": "bismite",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "SDK-first billing & entitlements runtime on Stripe — gate, meter, and monetize any feature in 3 lines, and it never takes your app down.",
   "type": "module",
   "license": "MIT",

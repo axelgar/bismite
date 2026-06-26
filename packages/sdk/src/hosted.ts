@@ -14,8 +14,10 @@ export function bismiteCounter(apiKey: string, baseUrl = "https://api.bismite.de
     async read(key) {
       const r = await fetch(`${baseUrl}/v1/usage?key=${encodeURIComponent(key)}`, { headers: auth });
       if (!r.ok) throw new Error(`bismite counter read ${r.status}`);
-      const data = (await r.json()) as { used?: number };
-      return data.used ?? 0;
+      // Carries the project's tier over-limit flag back to check() (PRD §8), alongside
+      // the count. A non-ok is still a throw => fail-open, distinct from over-limit.
+      const data = (await r.json()) as { used?: number; overLimit?: boolean };
+      return { used: data.used ?? 0, overLimit: !!data.overLimit };
     },
     async increment(key, amount) {
       const r = await fetch(`${baseUrl}/v1/usage/increment`, {

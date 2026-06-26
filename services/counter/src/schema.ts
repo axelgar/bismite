@@ -7,6 +7,9 @@ export const projects = pgTable("projects", {
   id: text("id").primaryKey(), // proj_<hex>
   name: text("name").notNull().default(""),
   owner: text("owner").notNull().default(""),
+  // Billing tier (PRD §8). Settable manually/by seed for now; #6 flips it via Stripe.
+  // Limits live in code (src/plans.ts), so this is just the tier id — easy to change.
+  plan: text("plan").notNull().default("free"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

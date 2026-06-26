@@ -24,6 +24,15 @@ test("MTU counts distinct users; repeats don't inflate it; calls count every op"
   assert.deepEqual(await summary(s, "proj_x", JUNE), { mtu: 3, calls: 5, period: "2026-06" });
 });
 
+test("meter returns running MTU+calls for live (for tier enforcement), null for test", async () => {
+  const s = makeStore({});
+  assert.equal(await meter(s, "proj_x", "test", "a:chat:2026-06", JUNE), null);
+  assert.deepEqual(await meter(s, "proj_x", "live", "a:chat:2026-06", JUNE), { mtu: 1, calls: 1 });
+  assert.deepEqual(await meter(s, "proj_x", "live", "b:chat:2026-06", JUNE), { mtu: 2, calls: 2 });
+  // Repeat user: MTU (distinct) holds, calls keep climbing.
+  assert.deepEqual(await meter(s, "proj_x", "live", "a:chat:2026-06", JUNE), { mtu: 2, calls: 3 });
+});
+
 test("test-mode traffic is excluded from both metrics", async () => {
   const s = makeStore({});
   await meter(s, "proj_x", "test", "a:chat:2026-06", JUNE);

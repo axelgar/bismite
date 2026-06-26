@@ -8,6 +8,13 @@
       "when": 1782403069372,
       "tag": "0000_white_lifeguard",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1782478497583,
+      "tag": "0001_bright_the_santerians",
+      "breakpoints": true
     }
   ]
 }

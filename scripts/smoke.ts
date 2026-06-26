@@ -157,6 +157,38 @@ if (rlCap > 0 && rlCap <= 100) {
   console.log("SKIP: rate-limit 429 check (set RATE_LIMIT_PER_MIN<=100 on server + smoke to run it)");
 }
 
+// 8) Tiers (hosted #5): the plan endpoint flips a project's tier, and metered counter
+//    ops carry the `overLimit` wire field. Well under any tier MTU => false (crossing the
+//    real Free MTU needs >1000 users; the unit tests cover the over-the-limit branch).
+const m5 = await fetch(`${base}/v1/projects`, {
+  method: "POST",
+  headers: { ...admin, "content-type": "application/json" },
+  body: JSON.stringify({ name: "smoke-tier", owner: "ci" }),
+});
+const { live: m5Live, projectId: m5Id } = (await m5.json()) as { live: string; projectId: string };
+
+assert.equal((await fetch(`${base}/v1/projects/plan`, {
+  method: "POST",
+  headers: { "content-type": "application/json" }, // no admin token
+  body: JSON.stringify({ projectId: m5Id, plan: "pro" }),
+})).status, process.env.ADMIN_TOKEN ? 401 : 200, "plan flip is admin-guarded");
+
+const setPro = await fetch(`${base}/v1/projects/plan`, {
+  method: "POST",
+  headers: { ...admin, "content-type": "application/json" },
+  body: JSON.stringify({ projectId: m5Id, plan: "pro" }),
+});
+assert.equal(setPro.status, 200, "plan set to pro");
+
+const op = await fetch(`${base}/v1/usage/increment`, {
+  method: "POST",
+  headers: { authorization: `Bearer ${m5Live}`, "content-type": "application/json" },
+  body: JSON.stringify({ key: "tier-u", amount: 1 }),
+});
+const opBody = (await op.json()) as { used: number; overLimit: boolean };
+assert.equal(opBody.overLimit, false, "well under the tier MTU => no over-limit signal");
+console.log("OK: tier plan endpoint flips the tier; counter op carries overLimit");
+
 // 5) Fail-open: counter unreachable => check() never blocks.
 const down = new Billing({
   plans: { free: { features: { "chat-message": { limit: 3, period: "day" } } } },

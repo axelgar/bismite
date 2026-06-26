@@ -27,23 +27,28 @@ export function extractUser(counterKey: string): string {
 const mtuKey = (proj: string, p: string) => `${proj}:mtu:${p}`;
 const callsKey = (proj: string, p: string) => `${proj}:calls:${p}`;
 
-/** Feed the two billing meters for one live counter op (a check or a record).
- *  Test mode is excluded so CI/build traffic never moves the bill (PRD §7). */
+/** Feed the two billing meters for one live counter op (a check or a record), and
+ *  return the running period totals so the caller can apply tier enforcement.
+ *  Test mode is excluded so CI/build traffic never moves the bill (PRD §7) => null. */
 export async function meter(
   store: Store,
   projectId: string,
   mode: Mode,
   counterKey: string,
   now = new Date(),
-): Promise<void> {
-  if (mode !== "live") return;
+): Promise<{ mtu: number; calls: number } | null> {
+  if (mode !== "live") return null;
   const p = period(now);
   // Independent keys, so run concurrently — halves the metering round-trips on the
   // hot path. (Batching into one Upstash pipeline is the next step — see BACKLOG.md.)
-  await Promise.all([
+  const [, calls] = await Promise.all([
     store.addMember(mtuKey(projectId, p), extractUser(counterKey)), // MTU = distinct users
     store.increment(callsKey(projectId, p), 1), // billable calls (guardrail meter)
   ]);
+  // ponytail: one extra SCARD for the live MTU count (SADD doesn't return cardinality).
+  // Folds into the pipeline batch when that BACKLOG item lands.
+  const mtu = await store.setSize(mtuKey(projectId, p));
+  return { mtu, calls };
 }
 
 /** Current-period billing numbers for a project (read path for the #4 dashboard). */
@@ -62,7 +67,8 @@ const RL_TTL = 70;
 /** Per-project fixed-window rate limit — protects the shared Redis bill and enforces
  *  fair-use (PRD §6, first Bismite-meters-Bismite dogfood). One INCR per request on a
  *  per-minute bucket; over `limit` => true (caller returns 429). `limit <= 0` disables.
- *  ponytail: flat per-project cap. Per-tier limits land with enforcement in hosted #5. */
+ *  ponytail: flat per-project cap. Per-tier rate-limit thresholds stay a PRD §13 open
+ *  question (need validation data); the MTU headline limit is the tier lever for now. */
 export async function rateLimited(
   store: Store,
   projectId: string,

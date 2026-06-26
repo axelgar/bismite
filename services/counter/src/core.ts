@@ -3,6 +3,7 @@
 // testable without booting a server and reusable by the local server + Vercel fn.
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ControlPlane, Mode } from "./db.js";
+import { PLANS, planFor, type PlanId } from "./plans.js";
 import { meter, summary, rateLimited } from "./metering.js";
 
 /** Tenant + mode namespace: a key from project A can never read/write project B's
@@ -106,6 +107,19 @@ export function createHandler(cp: ControlPlane, store: Store, adminToken?: strin
         return json(200, { key: await cp.regenerate(projectId, mode) });
       }
 
+      // --- Admin: set a project's billing tier (settable manually for now; #6 = Stripe). ---
+      if (req.method === "POST" && path.endsWith("/v1/projects/plan")) {
+        if (!isAdmin) return json(401, { error: "admin only" });
+        const b = await body();
+        if (!b.ok) return;
+        const { projectId, plan } = b.data ?? {};
+        if (typeof projectId !== "string" || typeof plan !== "string" || !(plan in PLANS)) {
+          return json(400, { error: "projectId and plan (free|pro|enterprise) required" });
+        }
+        await cp.setPlan(projectId, plan as PlanId);
+        return json(200, { projectId, plan });
+      }
+
       // Dashboard read path: a user's projects (+ key metadata, no secrets). The
       // dashboard passes the logged-in user as ?owner, then scopes its whole UI to this.
       if (req.method === "GET" && path.endsWith("/v1/projects")) {
@@ -126,17 +140,25 @@ export function createHandler(cp: ControlPlane, store: Store, adminToken?: strin
       const resolved = rawKey ? await cp.resolveKey(rawKey) : null;
       if (!resolved) return json(401, { error: "invalid api key" });
       const { projectId, mode } = resolved;
+      const plan = planFor(resolved.plan);
 
       // Billing meters (MTU + calls) for one counter op. Awaited but never allowed to
       // fail the request — a metering blip must not take the hot path down. Awaiting
       // (vs fire-and-forget) so serverless doesn't kill the writes after we respond.
+      // Returns the running period totals (or null in test/on error) so the caller can
+      // surface the tier over-limit signal.
       const recordUsage = async (key: string) => {
         try {
-          await meter(store, projectId, mode, key);
+          return await meter(store, projectId, mode, key);
         } catch (e) {
           console.error("meter error:", e);
+          return null;
         }
       };
+      // Over the tier's MTU allowance => surface an over-limit signal (PRD §8: MTU is the
+      // headline limit). It's advisory only — we never block, so fail-open holds and the
+      // app just shows "upgrade". Calls are a guardrail (overage in #6), not blocked here.
+      const overMtu = (m: { mtu: number; calls: number } | null) => !!m && m.mtu > plan.mtu;
 
       // Per-project rate limit on the counter hot path (not the dashboard summary).
       const isCounterCall = path.endsWith("/v1/usage/increment") || path.endsWith("/v1/usage");
@@ -157,16 +179,16 @@ export function createHandler(cp: ControlPlane, store: Store, adminToken?: strin
           return json(400, { error: "invalid amount" });
         }
         const used = await store.increment(nsKey(projectId, mode, key), amount);
-        await recordUsage(key);
-        return json(200, { used });
+        const m = await recordUsage(key);
+        return json(200, { used, overLimit: overMtu(m) });
       }
 
       if (req.method === "GET" && path.endsWith("/v1/usage")) {
         const key = url.searchParams.get("key");
         if (!key) return json(400, { error: "missing key" });
         const used = await store.read(nsKey(projectId, mode, key));
-        await recordUsage(key);
-        return json(200, { used });
+        const m = await recordUsage(key);
+        return json(200, { used, overLimit: overMtu(m) });
       }
 
       res.writeHead(404);

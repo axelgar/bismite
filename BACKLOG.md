@@ -4,6 +4,19 @@ Things we deliberately chose **not** to do yet, with the trigger for revisiting.
 Deferred ≠ forgotten. Each is isolated (mostly behind the counter's `Store` seam),
 so waiting costs little. Newest first.
 
+## Security / billing
+
+### 🔴 Plan upgrades are FREE self-serve until Stripe (#6) gates them
+- **Now:** the dashboard's `PlanSelect` → `setPlanAction` lets any logged-in user set
+  their project to Pro/Enterprise with **no payment**. It's the pre-Stripe manual tier
+  lever (#5) and nullifies MTU enforcement with one click.
+- **Why it's currently safe:** signup is **invite-only** (`SIGNUP_ALLOWLIST`), so only
+  trusted beta users can reach it.
+- **Must do before opening signup:** #6 gates *upgrades* behind Stripe Checkout
+  (downgrades can stay free). Until then, do NOT remove the signup allowlist.
+- **Where:** `apps/dashboard/app/dashboard/[projectId]/plan-select.tsx`,
+  `apps/dashboard/app/dashboard/actions.ts` (`setPlanAction`, marked `TODO(#6)`).
+
 ## Hosted counter — performance & scale
 
 ### Batch metering Redis ops into one pipeline (perf, hot path)

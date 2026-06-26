@@ -17,22 +17,34 @@ test("createProject mints resolvable test + live keys with the right prefixes", 
   assert.match(testKey, /^bsk_test_/);
   assert.match(liveKey, /^bsk_live_/);
 
-  assert.deepEqual(await cp.resolveKey(testKey), { projectId, mode: "test" });
-  assert.deepEqual(await cp.resolveKey(liveKey), { projectId, mode: "live" });
+  assert.deepEqual(await cp.resolveKey(testKey), { projectId, mode: "test", plan: "free" });
+  assert.deepEqual(await cp.resolveKey(liveKey), { projectId, mode: "live", plan: "free" });
 
   // Unknown key => null (=> 401), and the scheme/value must match exactly.
   assert.equal(await cp.resolveKey("bsk_test_nope"), null);
 });
 
+test("projects default to the free plan; setPlan changes what the hot path resolves", async () => {
+  const { projectId, live: liveKey } = await cp.createProject("tiers", "u-tier");
+  assert.deepEqual(await cp.resolveKey(liveKey), { projectId, mode: "live", plan: "free" });
+
+  await cp.setPlan(projectId, "pro");
+  // Cache is cleared on setPlan, so the new tier resolves immediately (demo: bump to pro).
+  assert.deepEqual(await cp.resolveKey(liveKey), { projectId, mode: "live", plan: "pro" });
+
+  const [view] = await cp.listProjects("u-tier");
+  assert.equal(view.plan, "pro");
+});
+
 test("regenerate replaces the key for a mode and invalidates the old one", async () => {
   const { projectId, test: oldKey, live: liveKey } = await cp.createProject("bravo", "u2");
-  assert.deepEqual(await cp.resolveKey(oldKey), { projectId, mode: "test" }); // warms cache too
+  assert.deepEqual(await cp.resolveKey(oldKey), { projectId, mode: "test", plan: "free" }); // warms cache too
 
   const newKey = await cp.regenerate(projectId, "test");
   assert.notEqual(newKey, oldKey);
   assert.equal(await cp.resolveKey(oldKey), null, "old key no longer resolves");
-  assert.deepEqual(await cp.resolveKey(newKey), { projectId, mode: "test" });
-  assert.deepEqual(await cp.resolveKey(liveKey), { projectId, mode: "live" }, "live key untouched");
+  assert.deepEqual(await cp.resolveKey(newKey), { projectId, mode: "test", plan: "free" });
+  assert.deepEqual(await cp.resolveKey(liveKey), { projectId, mode: "live", plan: "free" }, "live key untouched");
 });
 
 test("listProjects: scoped to owner, with per-mode key metadata and no secrets", async () => {

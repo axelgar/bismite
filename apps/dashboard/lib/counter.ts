@@ -7,10 +7,13 @@ import "server-only";
 const BASE = process.env.BISMITE_API_URL ?? "http://localhost:4000";
 const ADMIN = process.env.ADMIN_TOKEN;
 
+import type { PlanId } from "./plans";
+
 export type Mode = "test" | "live";
 export interface ProjectView {
   projectId: string;
   name: string;
+  plan: PlanId;
   createdAt: string;
   keys: Array<{ mode: Mode; createdAt: string; lastUsedAt: string | null }>;
 }
@@ -49,6 +52,14 @@ export function regenerate(projectId: string, mode: Mode) {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ projectId, mode }),
+  });
+}
+
+export function setPlan(projectId: string, plan: PlanId) {
+  return call<{ projectId: string; plan: PlanId }>(`/v1/projects/plan`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ projectId, plan }),
   });
 }
 
