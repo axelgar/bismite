@@ -1,7 +1,8 @@
 # Quickstart — gated feature in 5 minutes
 
-Add a usage limit + paywall to any feature in your app. This is the standalone
-path: `npm install bismite` into your own project. No monorepo, no clone.
+Add a usage limit + paywall to any feature in your app. `npm install bismite`,
+get one API key from the dashboard, and the usage counter is handled — no Redis
+to provision, no second vendor.
 
 > Want the full working app (Stripe Checkout + webhook upgrade loop wired)?
 > See [`examples/nextjs-chat`](examples/nextjs-chat). This page is the minimum to
@@ -13,30 +14,30 @@ path: `npm install bismite` into your own project. No monorepo, no clone.
 npm install bismite
 ```
 
-## 2. A usage counter (Upstash, free tier)
+## 2. Get an API key
 
 The meter needs an atomic, shared counter so the limit is correct across
-serverless instances. [Upstash Redis](https://upstash.com) has a free tier and a
-REST API (no TCP, works on any serverless runtime). Create a database and copy
-its REST URL + token into your env:
+serverless instances. The hosted counter handles that for you:
+
+1. Sign up at **[app.bismite.dev](https://app.bismite.dev)** _(early access — invite-only)_.
+2. **Create a project** → its `bsk_test_…` and `bsk_live_…` keys are revealed once.
+3. Copy the live key into your env:
 
 ```bash
 # .env.local
-UPSTASH_REDIS_REST_URL=https://<your-db>.upstash.io
-UPSTASH_REDIS_REST_TOKEN=<your-token>
+BISMITE_API_KEY=bsk_live_...
 ```
 
-> Don't want to sign up yet? Any object with `read(key)` / `increment(key, n)`
-> works — `CounterClient` is a two-method interface. An in-memory `Map` is fine
-> for a single-process demo (it just won't be correct across instances).
+> `bsk_test_…` is an isolated namespace that doesn't count toward billing — use
+> it for local dev and CI.
 
 ## 3. Define plans as code — `bismite.config.ts`
 
 ```ts
 import { Billing } from "bismite";
-import { upstashCounter } from "bismite/redis-counter";
+import { bismiteCounter } from "bismite/hosted";
 
-// Plans + per-feature limits. No dashboard, no deploy to change a number.
+// Plans as code — per-feature limits, defined here in your repo.
 export const plans = {
   free: { features: { "chat-message": { limit: 20, period: "day" } } },
   pro:  { features: { "chat-message": "unlimited" } },
@@ -47,10 +48,9 @@ export const bismite = new Billing({
   // Resolve a user's current plan. Hard-code for now; in step 5 this reads the
   // plan your Stripe webhook wrote.
   resolvePlan: (userId) => "free",
-  counter: upstashCounter(
-    process.env.UPSTASH_REDIS_REST_URL!,
-    process.env.UPSTASH_REDIS_REST_TOKEN!,
-  ),
+  // The hosted counter. The key resolves to your project server-side, so it
+  // only ever touches your counts.
+  counter: bismiteCounter(process.env.BISMITE_API_KEY!),
   // Where to send a blocked user to upgrade (step 5).
   upgradeUrl: (userId) => `/api/checkout?userId=${encodeURIComponent(userId)}`,
 });
@@ -84,7 +84,8 @@ export async function POST(req: Request) {
 ```
 
 That's a working gate + meter. Free users get 20/day, then a `402` with an
-upgrade URL. **Done with the SDK part.**
+upgrade URL. Watch usage climb — and upgrade your own Bismite plan — in the
+[dashboard](https://app.bismite.dev). **Done with the SDK part.**
 
 ### Metering tokens instead of calls
 
@@ -120,6 +121,29 @@ All three are implemented and live-verified in
 [`examples/nextjs-chat`](examples/nextjs-chat) — copy the four files in
 `app/api/` and `lib/`. That's the difference between "I counted usage" and "I got
 paid for it."
+
+## Self-host the counter — you're never locked in
+
+The hosted counter is the default, but it's not a lock-in. `bismiteCounter` is a
+thin client over a two-method `CounterClient` seam, so you can point the meter at
+your own infrastructure anytime — the rest of your config doesn't change.
+
+**Bring your own Upstash Redis.** [Upstash](https://upstash.com) has a free tier
+and a REST API (no TCP, works on any serverless runtime). Create a database, then:
+
+```ts
+import { upstashCounter } from "bismite/redis-counter";
+
+// counter: bismiteCounter(process.env.BISMITE_API_KEY!),  ← swap this line
+counter: upstashCounter(
+  process.env.UPSTASH_REDIS_REST_URL!,
+  process.env.UPSTASH_REDIS_REST_TOKEN!,
+),
+```
+
+Or point `bismiteCounter(apiKey, baseUrl)` at your own deployment of the counter
+service, or implement `CounterClient` (`read` / `increment`) against any backend
+you like. Same gate, same meter, your infra.
 
 ## Failure modes, on purpose
 

@@ -115,12 +115,19 @@
       <p>Zero dependencies, ESM, ships types. Node 18+ / any serverless runtime.</p>
 
       <h2 id="quickstart">Quickstart</h2>
-      <p>Two calls around the work you want to meter. Define plans as code, then gate before and record after.</p>
-      <h3>1. Plans &amp; client — <code>bismite.config.ts</code></h3>
-<pre><code><span class="k">import</span> { Billing } <span class="k">from</span> <span class="s">"bismite"</span>;
-<span class="k">import</span> { upstashCounter } <span class="k">from</span> <span class="s">"bismite/redis-counter"</span>;
+      <p>Get one API key, define plans as code, then gate before and record after. The usage counter is hosted for you — no Redis to provision, no second vendor.</p>
 
-<span class="c">// Per-feature limits. No dashboard, no deploy to change a number.</span>
+      <h3>1. Get an API key</h3>
+      <p>Sign up at <a href="https://app.bismite.dev">app.bismite.dev</a> <em>(early access — invite-only)</em>, create a project, and copy its live key. Drop it in your env:</p>
+<pre><code><span class="c"># .env.local</span>
+<span class="t">BISMITE_API_KEY</span>=bsk_live_...</code></pre>
+      <p><code>bsk_test_…</code> is an isolated namespace that doesn't count toward billing — use it for local dev and CI.</p>
+
+      <h3>2. Plans &amp; client — <code>bismite.config.ts</code></h3>
+<pre><code><span class="k">import</span> { Billing } <span class="k">from</span> <span class="s">"bismite"</span>;
+<span class="k">import</span> { bismiteCounter } <span class="k">from</span> <span class="s">"bismite/hosted"</span>;
+
+<span class="c">// Plans as code — per-feature limits, defined here in your repo.</span>
 <span class="k">export const</span> plans = {
   free: { features: { <span class="s">"chat-message"</span>: { limit: <span class="m">20</span>, period: <span class="s">"day"</span> } } },
   pro:  { features: { <span class="s">"chat-message"</span>: <span class="s">"unlimited"</span> } },
@@ -129,11 +136,11 @@
 <span class="k">export const</span> bismite = <span class="k">new</span> <span class="t">Billing</span>({
   plans,
   resolvePlan: (userId) => <span class="s">"free"</span>,           <span class="c">// real plan in step 4 (Stripe)</span>
-  counter: <span class="m">upstashCounter</span>(process.env.<span class="t">UPSTASH_REDIS_REST_URL</span>!, process.env.<span class="t">UPSTASH_REDIS_REST_TOKEN</span>!),
+  counter: <span class="m">bismiteCounter</span>(process.env.<span class="t">BISMITE_API_KEY</span>!),  <span class="c">// hosted, managed</span>
   upgradeUrl: (userId) => <span class="s">`/api/checkout?userId=</span>${<span class="k">encodeURIComponent</span>(userId)}<span class="s">`</span>,
 });</code></pre>
 
-      <h3>2. Gate before, meter after</h3>
+      <h3>3. Gate before, meter after</h3>
 <pre><code><span class="k">const</span> access = <span class="k">await</span> bismite.<span class="m">check</span>(userId, <span class="s">"chat-message"</span>);   <span class="c">// gate</span>
 <span class="k">if</span> (!access.allowed) {
   <span class="k">return</span> Response.<span class="m">json</span>({ upgradeUrl: access.upgradeUrl }, { status: <span class="m">402</span> });
@@ -142,8 +149,8 @@
 <span class="k">const</span> reply = <span class="k">await</span> <span class="m">callYourLLM</span>(message);                       <span class="c">// the thing that costs money</span>
 
 <span class="k">await</span> bismite.<span class="m">record</span>(userId, <span class="s">"chat-message"</span>, { count: <span class="m">1</span> });    <span class="c">// meter</span></code></pre>
-      <p>Free users get 20/day, then a <code>402</code> with an upgrade URL. That's a working gate + meter.</p>
-      <div class="note">The counter must be atomic and shared across instances — <a href="https://upstash.com">Upstash Redis</a> (free tier, REST API) is the zero-setup default. Any object with <code>read(key)</code> / <code>increment(key, n)</code> works; see <a href="#counters">Counters</a>.</div>
+      <p>Free users get 20/day, then a <code>402</code> with an upgrade URL. Watch usage climb and upgrade in the <a href="https://app.bismite.dev">dashboard</a>. That's a working gate + meter.</p>
+      <div class="note">The hosted counter is atomic, shared across instances, and the key resolves to your project server-side — so one key only ever touches your counts. Prefer to run it yourself? You're never locked in — see <a href="#counters">Counters</a>.</div>
 
       <h2 id="units">Units: count vs tokens</h2>
       <p>A limit counts one of two things. The default counts <b>calls</b> — N requests per period. For AI features the limit is usually <b>tokens</b>: add <code>unit: "tokens"</code> and record the real usage after the call returns.</p>
@@ -167,6 +174,7 @@ free: { features: { <span class="s">"chat-message"</span>: { limit: <span class=
         <tr><td><code>allowed</code></td><td><code>boolean</code></td><td>Whether the user may proceed.</td></tr>
         <tr><td><code>remaining</code></td><td><code>number</code></td><td>Units left this period (<code>Infinity</code> if unlimited; <code>-1</code> when the meter is down and the feature fails open).</td></tr>
         <tr><td><code>upgradeUrl</code></td><td><code>string | null</code></td><td>Where to send a blocked user. <code>null</code> when allowed.</td></tr>
+        <tr><td><code>overLimit</code></td><td><code>boolean</code></td><td>Advisory, from the hosted counter: your <em>project</em> is over its Bismite tier (MTU) allowance — orthogonal to <code>allowed</code> (the user's own plan rule). Never blocks; surface an "upgrade your Bismite plan" nudge. Always <code>false</code> on a self-hosted/BYO counter.</td></tr>
       </table>
 
       <h3 id="record"><code>record(userId, feature, usage?) → Promise&lt;void&gt;</code></h3>
@@ -196,16 +204,22 @@ free: { features: { <span class="s">"chat-message"</span>: { limit: <span class=
       </table>
 
       <h3 id="counters">Counters</h3>
-      <p>The meter is a two-method interface — bring your own backend, or use a built-in.</p>
-<pre><code><span class="k">import</span> { upstashCounter } <span class="k">from</span> <span class="s">"bismite/redis-counter"</span>;  <span class="c">// atomic, cross-instance (recommended)</span>
-<span class="k">import</span> { httpCounter }    <span class="k">from</span> <span class="s">"bismite/http-counter"</span>;   <span class="c">// point at your own service</span>
+      <p>The counter is the managed runtime — <code>bismiteCounter(apiKey)</code> and you're done. It's also a two-method seam, so you're never locked in: self-host it anytime without touching the rest of your config.</p>
+<pre><code><span class="k">import</span> { bismiteCounter } <span class="k">from</span> <span class="s">"bismite/hosted"</span>;        <span class="c">// hosted, managed (default)</span>
+<span class="k">import</span> { upstashCounter } <span class="k">from</span> <span class="s">"bismite/redis-counter"</span>; <span class="c">// self-host: bring your own Upstash</span>
+<span class="k">import</span> { httpCounter }    <span class="k">from</span> <span class="s">"bismite/http-counter"</span>;   <span class="c">// self-host: point at your own service</span>
 
 <span class="c">// or any object shaped like this:</span>
 <span class="k">interface</span> <span class="t">CounterClient</span> {
-  <span class="m">read</span>(key: <span class="t">string</span>): <span class="t">Promise</span>&lt;<span class="t">number</span>&gt;;
+  <span class="m">read</span>(key: <span class="t">string</span>): <span class="t">Promise</span>&lt;<span class="t">number</span> | { used: <span class="t">number</span>; overLimit?: <span class="t">boolean</span> }&gt;;
   <span class="m">increment</span>(key: <span class="t">string</span>, amount: <span class="t">number</span>): <span class="t">Promise</span>&lt;<span class="t">void</span>&gt;;
 }</code></pre>
-      <p><code>upstashCounter</code> uses atomic <code>INCRBY</code> so concurrent records never lose or double-count; keys are period-scoped and expire automatically.</p>
+      <p><code>bismiteCounter(apiKey, baseUrl?)</code> defaults its <code>baseUrl</code> to <code>https://api.bismite.dev</code>; pass your own to self-host the counter service. It throws on any failure, so <code>check()</code>/<code>record()</code> fail open — a down counter never takes your app down.</p>
+      <h4 style="margin:20px 0 6px;color:var(--muted);font-size:14px;">Self-host — you're never locked in</h4>
+      <p>Bring your own <a href="https://upstash.com">Upstash Redis</a> (free tier, REST API): create a database and swap one line —</p>
+<pre><code><span class="c">// counter: bismiteCounter(process.env.BISMITE_API_KEY!),  ← swap this line</span>
+counter: <span class="m">upstashCounter</span>(process.env.<span class="t">UPSTASH_REDIS_REST_URL</span>!, process.env.<span class="t">UPSTASH_REDIS_REST_TOKEN</span>!),</code></pre>
+      <p><code>upstashCounter</code> uses atomic <code>INCRBY</code> so concurrent records never lose or double-count; keys are period-scoped and expire automatically. Or implement <code>CounterClient</code> against any backend you like — same gate, same meter, your infra.</p>
 
       <h2 id="stripe">Stripe upgrade loop</h2>
       <p>To make the paywall take money, wire three things so an upgrade flips the plan with no deploy:</p>
