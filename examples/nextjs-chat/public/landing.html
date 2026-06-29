@@ -4,48 +4,108 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Bismite — gate, meter & monetize any feature in 3 lines</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <style>
-    :root { --bg:#0b0d12; --fg:#e8eaed; --muted:#9aa3b2; --accent:#7c9cff; --card:#13161d; --line:#222734; }
+    /* Halo design tokens — keep in sync with apps/dashboard/app/globals.css */
+    :root {
+      /* surfaces */
+      --bg:#0B0D12; --surface:#14161E; --surface-2:#0E1017;
+      --border:#242837; --border-soft:#1C2030; --input-border:#2C3140;
+      /* text */
+      --text:#E9EAEE; --text-2:#C7CAD3; --muted:#9298A8; --faint:#6E7485;
+      /* accent (iris) */
+      --accent:#9B7CFF; --accent-hover:#AC92FF; --accent-tint:#B7A6FF;
+      /* gradients + glow */
+      --iridescent:linear-gradient(135deg, #9B7CFF, #7CB5FF, #6EE0D0);
+      --iridescent-110:linear-gradient(110deg, #9B7CFF, #7CB5FF, #6EE0D0);
+      --halo:radial-gradient(50% 50% at 50% 50%, rgba(155,124,255,.16), transparent 70%);
+      /* status */
+      --success:#3ECF8E; --warning:#E8B339; --over-limit:#F2793D; --danger:#F0556A;
+      /* code syntax palette */
+      --syn-keyword:#7C86A0; --syn-ident:#9B7CFF; --syn-method:#6EE0D0;
+      --syn-string:#3ECF8E; --syn-number:#E8B339; --syn-comment:#5B6171;
+      /* radii */
+      --r-card:16px; --r-btn:9px; --r-code:10px; --r-pill:999px;
+      /* card shadow */
+      --shadow-card:0 28px 64px -30px rgba(0,0,0,.75), inset 0 1px 0 rgba(255,255,255,.04);
+    }
     * { box-sizing: border-box; }
-    body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 system-ui, sans-serif; }
-    .wrap { max-width: 760px; margin: 0 auto; padding: 80px 24px; }
-    h1 { font-size: 2.6rem; line-height:1.15; margin:0 0 16px; letter-spacing:-0.02em; }
-    h1 .accent { color: var(--accent); }
-    .sub { font-size:1.2rem; color:var(--muted); margin:0 0 36px; }
-    pre { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:20px; overflow:auto; font-size:13.5px; }
-    code { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
-    .c { color:#c5cad6; } .k { color:#7c9cff; } .s { color:#9ece6a; } .m { color:#e0af68; }
+    body { margin:0; background:var(--bg); color:var(--text); font:16px/1.6 "Space Grotesk", system-ui, sans-serif; -webkit-font-smoothing:antialiased; }
+    code, pre { font-family:"JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace; }
+    .wrap { position:relative; max-width: 760px; margin: 0 auto; padding: 80px 24px; overflow:hidden; }
+    .halo { position:absolute; top:-120px; left:50%; transform:translateX(-50%); width:900px; height:700px; background:var(--halo); pointer-events:none; z-index:0; }
+    .topnav, .tag, h1, .sub, pre, .props, h2, form, .foot { position:relative; z-index:1; }
+
+    h1 { font-family:"Space Grotesk", sans-serif; font-weight:600; font-size: 42px; line-height:1.12; margin:0 0 16px; letter-spacing:-0.02em; }
+    h1 .accent { background:var(--iridescent-110); -webkit-background-clip:text; background-clip:text; color:transparent; }
+    .sub { font-size:16px; color:var(--muted); margin:0 0 36px; max-width:560px; }
+    .sub b { color:var(--text-2); font-weight:600; }
+
+    pre { position:relative; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-code); padding:38px 20px 20px; overflow:auto; font-size:13.5px; box-shadow:var(--shadow-card); }
+    pre::before { content:""; position:absolute; top:0; left:0; right:0; height:2px; background:var(--iridescent); border-radius:var(--r-code) var(--r-code) 0 0; }
+    pre .winbar { position:absolute; top:12px; left:16px; right:16px; display:flex; align-items:center; gap:7px; }
+    pre .dot { width:10px; height:10px; border-radius:50%; background:var(--border); }
+    pre .fname { margin-left:8px; font-size:11.5px; color:var(--faint); letter-spacing:.02em; }
+    /* code syntax — Halo palette */
+    .c { color:var(--syn-comment); } .k { color:var(--syn-keyword); } .s { color:var(--syn-string); } .m { color:var(--syn-number); }
+
     .props { display:grid; gap:16px; margin:40px 0; }
-    .prop { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px 20px; }
-    .prop b { color:var(--fg); }
+    .prop { background:var(--surface); border:1px solid var(--border); border-radius:var(--r-card); padding:18px 20px; box-shadow:var(--shadow-card); color:var(--muted); }
+    .prop b { color:var(--text); font-weight:600; }
+
+    h2 { font-family:"Space Grotesk", sans-serif; font-weight:600; letter-spacing:-0.01em; }
     form { display:flex; gap:10px; margin-top:16px; flex-wrap:wrap; }
-    input { flex:1; min-width:220px; padding:13px 16px; border-radius:10px; border:1px solid var(--line); background:#0e1117; color:var(--fg); font-size:15px; }
-    button { padding:13px 22px; border-radius:10px; border:0; background:var(--accent); color:#0b0d12; font-weight:600; font-size:15px; cursor:pointer; }
-    button:disabled { opacity:.6; cursor:default; }
+    input { flex:1; min-width:220px; padding:13px 16px; border-radius:var(--r-btn); border:1px solid var(--input-border); background:var(--surface-2); color:var(--text); font-size:15px; font-family:"JetBrains Mono", monospace; transition:border-color .18s ease, box-shadow .18s ease; }
+    input::placeholder { color:var(--faint); }
+    input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(155,124,255,.2); }
+    button { padding:13px 22px; border-radius:var(--r-btn); border:0; background:var(--accent); color:#0B0D12; font-weight:600; font-size:15px; font-family:"Space Grotesk", sans-serif; cursor:pointer; transition:background .18s ease, box-shadow .18s ease; }
+    button:hover { background:var(--accent-hover); box-shadow:0 0 0 3px rgba(155,124,255,.2); }
+    button:disabled { opacity:.6; cursor:default; box-shadow:none; }
     .foot { color:var(--muted); font-size:13px; margin-top:14px; }
-    .tag { display:inline-block; font-size:12px; color:var(--accent); border:1px solid var(--line); border-radius:999px; padding:4px 12px; margin-bottom:24px; }
+    .foot code { color:var(--accent-tint); }
+    .tag { display:inline-block; font-size:12px; font-family:"JetBrains Mono", monospace; color:var(--accent-tint); background:rgba(155,124,255,.1); border:1px solid rgba(155,124,255,.28); border-radius:var(--r-pill); padding:4px 12px; margin-bottom:24px; }
+
     .topnav { display:flex; justify-content:space-between; align-items:center; margin-bottom:48px; }
-    .topnav .brand { font-weight:700; font-size:1.05rem; text-decoration:none; color:var(--fg); }
-    .topnav .brand .accent { color:var(--accent); }
-    .topnav .links a { color:var(--muted); text-decoration:none; margin-left:20px; font-size:14px; }
-    .topnav .links a:hover { color:var(--fg); }
+    .topnav .brand { display:flex; align-items:center; gap:9px; font-family:"Space Grotesk", sans-serif; font-weight:600; font-size:1.05rem; text-decoration:none; color:var(--text); }
+    .topnav .brand svg { display:block; }
+    .topnav .links { display:flex; align-items:center; gap:20px; }
+    .topnav .links a { color:var(--muted); text-decoration:none; font-size:14px; transition:color .18s ease; }
+    .topnav .links a:hover { color:var(--text); }
+    .topnav .links a.cta { background:var(--accent); color:#0B0D12; font-weight:600; padding:8px 16px; border-radius:var(--r-btn); transition:background .18s ease, box-shadow .18s ease; }
+    .topnav .links a.cta:hover { background:var(--accent-hover); color:#0B0D12; box-shadow:0 0 0 3px rgba(155,124,255,.2); }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition:none !important; animation:none !important; }
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
+    <div class="halo" aria-hidden="true"></div>
     <div class="topnav">
-      <a class="brand" href="/landing.html">bis<span class="accent">mite</span></a>
+      <a class="brand" href="/landing.html">
+        <svg width="26" height="26" viewBox="0 0 34 34" fill="none" aria-hidden="true">
+          <rect x="3" y="3" width="28" height="28" rx="3.5" stroke="url(#irLanding)" stroke-width="1.8"/>
+          <rect x="9.5" y="9.5" width="15" height="15" rx="2.2" stroke="url(#irLanding)" stroke-width="1.8" opacity=".82"/>
+          <rect x="14.8" y="14.8" width="4.4" height="4.4" rx="1" fill="url(#irLanding)"/>
+          <defs><linearGradient id="irLanding" x1="3" y1="3" x2="31" y2="31" gradientUnits="userSpaceOnUse"><stop stop-color="#9B7CFF"/><stop offset=".5" stop-color="#7CB5FF"/><stop offset="1" stop-color="#6EE0D0"/></linearGradient></defs>
+        </svg>
+        Bismite
+      </a>
       <div class="links">
         <a href="/docs.html">Docs</a>
         <a href="https://github.com/axelgar/bismite">GitHub</a>
         <a href="https://www.npmjs.com/package/bismite">npm</a>
+        <a class="cta" href="#waitlist">Request access</a>
       </div>
     </div>
-    <span class="tag">SDK-first billing for AI apps</span>
+    <span class="tag">npm i bismite</span>
     <h1>Gate, meter & monetize any feature in <span class="accent">3 lines</span>.</h1>
     <p class="sub">Bismite is the billing runtime that lives in your code — and <b>never takes your app down</b>.</p>
 
-<pre><code><span class="k">const</span> access = <span class="k">await</span> bismite.<span class="m">check</span>(userId, <span class="s">"chat-message"</span>);   <span class="c">// gate</span>
+<pre><span class="winbar" aria-hidden="true"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">app/api/chat/route.ts</span></span><code><span class="k">const</span> access = <span class="k">await</span> bismite.<span class="m">check</span>(userId, <span class="s">"chat-message"</span>);   <span class="c">// gate</span>
 <span class="k">if</span> (!access.allowed) <span class="k">return</span> Response.<span class="m">json</span>({ upgradeUrl: access.upgradeUrl }, { status: <span class="m">402</span> });
 
 <span class="c">// ...your expensive LLM call...</span>

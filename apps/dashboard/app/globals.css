@@ -1,48 +1,141 @@
-:root {
-  --fg: #18181b;
-  --muted: #71717a;
-  --border: #e4e4e7;
-  --accent: #4f46e5;
-  --bg-soft: #f4f4f5;
+@import "tailwindcss";
+
+/* ============================================================================
+   Halo design tokens — the single source of truth for the dashboard theme.
+   Keep these hex values in sync with the static marketing pages, which mirror
+   the same palette as CSS variables:
+   examples/nextjs-chat/public/landing.html, .../docs.html
+   ========================================================================== */
+@theme {
+  --color-background: #0b0d12;
+  --color-surface: #14161e;
+  --color-surface-2: #0e1017;
+  --color-border: #242837;
+  --color-border-soft: #1c2030;
+  --color-input: #2c3140;
+
+  --color-foreground: #e9eaee;
+  --color-foreground-2: #c7cad3;
+  --color-muted: #14161e; /* muted surface fill */
+  --color-muted-foreground: #9298a8;
+  --color-faint: #6e7485;
+
+  --color-primary: #9b7cff;
+  --color-primary-hover: #ac92ff;
+  --color-primary-foreground: #0b0d12;
+  --color-accent-tint: #b7a6ff;
+
+  --color-card: #14161e;
+  --color-popover: #14161e;
+
+  --color-success: #3ecf8e;
+  --color-warning: #e8b339;
+  --color-over: #f2793d;
+  --color-destructive: #f0556a;
+
+  --color-ring: #9b7cff;
+
+  /* code syntax */
+  --color-kw: #7c86a0;
+  --color-ident: #9b7cff;
+  --color-method: #6ee0d0;
+  --color-str: #3ecf8e;
+  --color-num: #e8b339;
+  --color-comment: #5b6171;
+
+  --font-sans: var(--font-space-grotesk), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+
+  --radius-card: 16px;
+  --radius-btn: 9px;
+  --radius-code: 10px;
+  --radius-meter: 6px;
+
+  --shadow-card: 0 28px 64px -30px rgba(0, 0, 0, 0.75),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --shadow-glow-over: 0 0 36px -18px rgba(242, 121, 61, 0.4);
 }
-* { box-sizing: border-box; }
-body {
-  font-family: system-ui, sans-serif;
-  color: var(--fg);
-  max-width: 720px;
-  margin: 40px auto;
-  padding: 16px;
-  line-height: 1.5;
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  html {
+    color-scheme: dark;
+  }
+  body {
+    background: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  /* visible focus everywhere (a11y) */
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
 }
-a { color: var(--accent); }
-h1 { font-size: 1.5rem; }
-h2 { font-size: 1.1rem; }
-input, button {
-  font: inherit;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+
+/* ---- Branded helpers Tailwind arbitrary values express poorly ---- */
+
+/* iridescent text — used on the headline & accents */
+.text-gradient {
+  background: linear-gradient(110deg, #9b7cff, #7cb5ff 55%, #6ee0d0);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
-button {
-  cursor: pointer;
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
+
+/* halo glow blob — place inside a position:relative, overflow:hidden parent */
+.halo {
+  position: absolute;
+  pointer-events: none;
+  background: radial-gradient(
+    50% 50% at 50% 50%,
+    rgba(155, 124, 255, 0.16),
+    transparent 70%
+  );
 }
-button.secondary { background: #fff; color: var(--fg); border-color: var(--border); }
-button:disabled { opacity: 0.5; cursor: default; }
-.card { border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin: 12px 0; }
-.muted { color: var(--muted); font-size: 0.9rem; }
-.error { color: #dc2626; font-size: 0.9rem; }
-code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-pre {
-  background: var(--bg-soft);
-  padding: 12px;
-  border-radius: 6px;
-  overflow-x: auto;
-  font-size: 0.85rem;
+
+@keyframes meterIn {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
 }
-.key { background: var(--bg-soft); padding: 2px 6px; border-radius: 4px; word-break: break-all; }
-.bar { background: var(--bg-soft); border-radius: 6px; height: 12px; overflow: hidden; }
-.bar > span { display: block; height: 100%; background: var(--accent); }
-.row { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
+.animate-meter {
+  transform-origin: left;
+  animation: meterIn 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* dialog / popover motion (data-state driven, Radix) */
+@keyframes overlayIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes contentIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

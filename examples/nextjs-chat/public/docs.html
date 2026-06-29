@@ -4,52 +4,93 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Bismite docs — gate, meter & monetize any feature</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <style>
-    :root { --bg:#0b0d12; --fg:#e8eaed; --muted:#9aa3b2; --accent:#7c9cff; --card:#13161d; --line:#222734; }
+    /* Halo design tokens — keep in sync with apps/dashboard/app/globals.css */
+    :root {
+      /* surfaces */
+      --bg:#0B0D12; --surface:#14161E; --surface-2:#0E1017;
+      --border:#242837; --border-soft:#1C2030; --input-border:#2C3140;
+      /* text */
+      --text:#E9EAEE; --text-2:#C7CAD3; --muted:#9298A8; --faint:#6E7485;
+      /* accent (iris) */
+      --accent:#9B7CFF; --accent-hover:#AC92FF; --accent-tint:#B7A6FF;
+      /* gradients + glow */
+      --iridescent:linear-gradient(135deg, #9B7CFF, #7CB5FF, #6EE0D0);
+      --iridescent-110:linear-gradient(110deg, #9B7CFF, #7CB5FF, #6EE0D0);
+      --halo:radial-gradient(50% 50% at 50% 50%, rgba(155,124,255,.16), transparent 70%);
+      /* status */
+      --success:#3ECF8E; --warning:#E8B339; --over-limit:#F2793D; --danger:#F0556A;
+      /* code syntax palette */
+      --syn-keyword:#7C86A0; --syn-ident:#9B7CFF; --syn-method:#6EE0D0;
+      --syn-string:#3ECF8E; --syn-number:#E8B339; --syn-comment:#5B6171;
+      /* radii */
+      --r-card:16px; --r-btn:9px; --r-code:10px; --r-pill:999px;
+      /* card shadow */
+      --shadow-card:0 28px 64px -30px rgba(0,0,0,.75), inset 0 1px 0 rgba(255,255,255,.04);
+    }
     * { box-sizing: border-box; }
     html { scroll-behavior: smooth; }
-    body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 system-ui, sans-serif; }
+    body { margin:0; background:var(--bg); color:var(--text); font:16px/1.6 "Space Grotesk", system-ui, sans-serif; -webkit-font-smoothing:antialiased; }
+    code, pre { font-family:"JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace; }
     .layout { max-width: 980px; margin: 0 auto; padding: 0 24px; display: grid; grid-template-columns: 200px 1fr; gap: 48px; }
     nav { position: sticky; top: 0; align-self: start; padding: 48px 0; height: 100vh; overflow:auto; }
-    nav .brand { font-weight:700; font-size:1.1rem; margin-bottom:6px; display:block; color:var(--fg); text-decoration:none; }
-    nav .brand .accent { color:var(--accent); }
-    nav .ver { font-size:12px; color:var(--muted); margin-bottom:24px; }
-    nav a { display:block; color:var(--muted); text-decoration:none; padding:6px 0; font-size:14px; border-left:2px solid transparent; padding-left:12px; margin-left:-14px; }
-    nav a:hover { color:var(--fg); }
+    nav .brand { display:flex; align-items:center; gap:9px; font-family:"Space Grotesk", sans-serif; font-weight:600; font-size:1.1rem; margin-bottom:6px; color:var(--text); text-decoration:none; }
+    nav .brand svg { display:block; }
+    nav .ver { font-size:12px; font-family:"JetBrains Mono", monospace; color:var(--muted); margin-bottom:24px; }
+    nav a { display:block; color:var(--muted); text-decoration:none; padding:6px 0; font-size:14px; border-left:2px solid transparent; padding-left:12px; margin-left:-14px; transition:color .18s ease, border-color .18s ease; }
+    nav a:hover { color:var(--text); border-left-color:var(--accent); }
     nav a.sub { padding-left:26px; font-size:13px; }
     nav .back { margin-top:24px; color:var(--accent); font-size:13px; }
+    nav .back:hover { color:var(--accent-hover); }
     main { padding: 48px 0 120px; min-width:0; }
-    h1 { font-size: 2.2rem; line-height:1.15; margin:0 0 8px; letter-spacing:-0.02em; }
-    h1 .accent { color: var(--accent); }
+    h1 { font-family:"Space Grotesk", sans-serif; font-weight:600; font-size: 2.2rem; line-height:1.15; margin:0 0 8px; letter-spacing:-0.02em; }
+    h1 .accent { background:var(--iridescent-110); -webkit-background-clip:text; background-clip:text; color:transparent; }
     .sub { font-size:1.15rem; color:var(--muted); margin:0 0 8px; }
     .lead { color:var(--muted); margin:0 0 40px; }
-    h2 { font-size:1.5rem; margin:56px 0 12px; letter-spacing:-0.01em; padding-top:8px; }
-    h3 { font-size:1.1rem; margin:32px 0 8px; }
-    p { color:#c9cfdb; }
+    h2 { font-family:"Space Grotesk", sans-serif; font-weight:600; font-size:1.5rem; margin:56px 0 12px; letter-spacing:-0.01em; padding-top:8px; }
+    h3 { font-family:"Space Grotesk", sans-serif; font-weight:600; font-size:1.1rem; margin:32px 0 8px; }
+    p { color:var(--text-2); }
     a { color: var(--accent); }
-    pre { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; overflow:auto; font-size:13px; }
-    code { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
-    p code, li code, td code { background:var(--card); border:1px solid var(--line); border-radius:6px; padding:1px 6px; font-size:13px; }
-    .c { color:#7f8694; } .k { color:#7c9cff; } .s { color:#9ece6a; } .m { color:#e0af68; } .t { color:#79c0ff; }
+    a:hover { color:var(--accent-hover); }
+    pre { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-code); padding:18px; overflow:auto; font-size:13px; box-shadow:var(--shadow-card); }
+    p code, li code, td code { background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:1px 6px; font-size:13px; color:var(--text-2); }
+    /* code syntax — Halo palette (class names preserved) */
+    .c { color:var(--syn-comment); } .k { color:var(--syn-keyword); } .s { color:var(--syn-string); } .m { color:var(--syn-number); } .t { color:var(--syn-method); }
     table { border-collapse: collapse; width:100%; margin:12px 0; font-size:14px; }
-    th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+    th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--border); vertical-align:top; color:var(--text-2); }
     th { color:var(--muted); font-weight:600; }
-    .note { background:var(--card); border:1px solid var(--line); border-left:3px solid var(--accent); border-radius:8px; padding:14px 18px; margin:20px 0; color:#c9cfdb; }
-    .tag { display:inline-block; font-size:12px; color:var(--accent); border:1px solid var(--line); border-radius:999px; padding:4px 12px; margin-bottom:20px; }
+    .note { background:var(--surface); border:1px solid var(--border); border-left:3px solid var(--accent); border-radius:var(--r-btn); padding:14px 18px; margin:20px 0; color:var(--text-2); }
+    .tag { display:inline-block; font-size:12px; font-family:"JetBrains Mono", monospace; color:var(--accent-tint); background:rgba(155,124,255,.1); border:1px solid rgba(155,124,255,.28); border-radius:var(--r-pill); padding:4px 12px; margin-bottom:20px; }
     @media (max-width: 720px) {
       .layout { grid-template-columns: 1fr; gap:0; }
       nav { position:static; height:auto; padding:32px 0 0; }
       nav a { display:inline-block; margin-right:12px; border-left:0; padding-left:0; margin-left:0; }
+      nav a:hover { border-left:0; }
       nav a.sub { display:none; }
       main { padding-top:24px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior:auto; }
+      * { transition:none !important; animation:none !important; }
     }
   </style>
 </head>
 <body>
   <div class="layout">
     <nav>
-      <a class="brand" href="/landing.html">bis<span class="accent">mite</span></a>
-      <div class="ver">SDK reference · v0.2</div>
+      <a class="brand" href="/landing.html">
+        <svg width="24" height="24" viewBox="0 0 34 34" fill="none" aria-hidden="true">
+          <rect x="3" y="3" width="28" height="28" rx="3.5" stroke="url(#irDocs)" stroke-width="1.8"/>
+          <rect x="9.5" y="9.5" width="15" height="15" rx="2.2" stroke="url(#irDocs)" stroke-width="1.8" opacity=".82"/>
+          <rect x="14.8" y="14.8" width="4.4" height="4.4" rx="1" fill="url(#irDocs)"/>
+          <defs><linearGradient id="irDocs" x1="3" y1="3" x2="31" y2="31" gradientUnits="userSpaceOnUse"><stop stop-color="#9B7CFF"/><stop offset=".5" stop-color="#7CB5FF"/><stop offset="1" stop-color="#6EE0D0"/></linearGradient></defs>
+        </svg>
+        Bismite
+      </a>
+      <div class="ver">SDK reference · v0.4</div>
       <a href="#install">Install</a>
       <a href="#quickstart">Quickstart</a>
       <a href="#units">Units: count vs tokens</a>
