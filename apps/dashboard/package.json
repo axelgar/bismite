@@ -11,12 +11,13 @@
     "db:setup": "node --env-file=.env.local scripts/setup-db.mjs"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^0.10.4",
     "better-auth": "^1.6.21",
     "drizzle-orm": "^0.38.3",
-    "@neondatabase/serverless": "^0.10.4",
     "next": "^15.5.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "resend": "^6.16.0",
     "stripe": "^18.5.0"
   },
   "devDependencies": {

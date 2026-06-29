@@ -3,6 +3,15 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError } from "better-auth/api";
 import { db } from "./db";
+import { sendEmail } from "./email";
+
+// Minimal branded HTML for the transactional emails (better-auth hands us a ready `url`).
+const emailHtml = (intro: string, label: string, url: string) =>
+  `<div style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.5;color:#18181b">
+     <p>${intro}</p>
+     <p><a href="${url}" style="display:inline-block;background:#9B7CFF;color:#0B0D12;font-weight:600;text-decoration:none;padding:10px 18px;border-radius:8px">${label}</a></p>
+     <p style="color:#71717a;font-size:13px">Or paste this link into your browser:<br>${url}</p>
+   </div>`;
 
 // Invite-only gate. SIGNUP_ALLOWLIST = comma-separated exact emails and/or `@domain`
 // entries (e.g. "me@studioapp.co,@studioapp.co,partner@acme.com"). Unset/empty => open
@@ -19,7 +28,30 @@ function signupAllowed(email: string): boolean {
 
 export const auth = betterAuth({
   database: drizzleAdapter(db, { provider: "pg" }),
-  emailAndPassword: { enabled: true },
+  emailAndPassword: {
+    enabled: true,
+    // Off until the bismite.dev sender domain is verified + delivery is confirmed —
+    // flip to true for public launch so unverified emails can't reach the dashboard.
+    requireEmailVerification: false,
+    sendResetPassword: async ({ user, url }) => {
+      await sendEmail(
+        user.email,
+        "Reset your Bismite password",
+        emailHtml("Forgot your password? Set a new one:", "Reset password", url),
+      );
+    },
+  },
+  emailVerification: {
+    sendOnSignUp: true,
+    autoSignInAfterVerification: true,
+    sendVerificationEmail: async ({ user, url }) => {
+      await sendEmail(
+        user.email,
+        "Verify your Bismite email",
+        emailHtml("Confirm your email to finish setting up Bismite:", "Verify email", url),
+      );
+    },
+  },
   databaseHooks: {
     user: {
       create: {
@@ -32,11 +64,4 @@ export const auth = betterAuth({
       },
     },
   },
-  // Verify later: when you open signup beyond the allowlist, wire an email provider and
-  // enable verification — no schema change, the `verification` table already exists:
-  //   emailAndPassword: { enabled: true, requireEmailVerification: true },
-  //   emailVerification: {
-  //     sendOnSignUp: true,
-  //     sendVerificationEmail: async ({ user, url }) => { /* await resend.emails.send(...) */ },
-  //   },
 });

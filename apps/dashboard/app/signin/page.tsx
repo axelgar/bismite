@@ -12,6 +12,7 @@ export default function SignIn() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
 
   async function submit(e: React.FormEvent) {
@@ -25,6 +26,16 @@ export default function SignIn() {
     setBusy(false);
     if (res.error) return setError(res.error.message ?? "Something went wrong");
     router.push("/dashboard");
+  }
+
+  async function forgot() {
+    setError("");
+    setNotice("");
+    if (!email) return setError("Enter your email first, then click “Forgot password”.");
+    // Always succeeds to the user (no account enumeration); the email only arrives if the
+    // account exists. The link lands on /reset-password?token=…
+    await authClient.requestPasswordReset({ email, redirectTo: "/reset-password" });
+    setNotice("If that email has an account, a reset link is on its way.");
   }
 
   return (
@@ -50,7 +61,21 @@ export default function SignIn() {
           required
         />
         {error && <p className="error">{error}</p>}
+        {notice && <p className="muted">{notice}</p>}
         <button disabled={busy}>{busy ? "…" : mode === "signup" ? "Sign up" : "Sign in"}</button>
+        {mode === "signin" && (
+          <a
+            href="#"
+            className="muted"
+            style={{ fontSize: "0.85rem" }}
+            onClick={(e) => {
+              e.preventDefault();
+              forgot();
+            }}
+          >
+            Forgot password?
+          </a>
+        )}
       </form>
       <p className="muted">
         {mode === "signup" ? "Already have an account? " : "New here? "}
@@ -59,6 +84,7 @@ export default function SignIn() {
           onClick={(e) => {
             e.preventDefault();
             setError("");
+            setNotice("");
             setMode(mode === "signup" ? "signin" : "signup");
           }}
         >
