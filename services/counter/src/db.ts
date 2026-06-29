@@ -14,6 +14,7 @@ export interface ProjectView {
   projectId: string;
   name: string;
   plan: PlanId;
+  stripeCustomerId: string | null;
   createdAt: Date;
   keys: Array<{ mode: Mode; createdAt: Date; lastUsedAt: Date | null }>;
 }
@@ -28,6 +29,9 @@ export interface ControlPlane {
   regenerate(projectId: string, mode: Mode): Promise<string>;
   /** Set a project's billing tier; the hot path picks it up on the next resolve. */
   setPlan(projectId: string, plan: PlanId): Promise<void>;
+  /** Stripe-authoritative tier flip (#6): set plan and, when a checkout first creates
+   *  one, the customer id. Called only by the dashboard's verified Stripe webhook. */
+  setBilling(projectId: string, plan: PlanId, stripeCustomerId?: string): Promise<void>;
   /** Projects owned by `owner` (+ key metadata, no secrets). The dashboard scopes
    *  every view to the logged-in user via this — it's the per-user authz boundary. */
   listProjects(owner: string): Promise<ProjectView[]>;
@@ -130,6 +134,15 @@ export function makeControlPlane(env: Record<string, string | undefined>): Contr
       cache.clear(); // rare op — drop the cache so the hot path enforces the new tier now
     },
 
+    async setBilling(projectId, plan, stripeCustomerId) {
+      const d = await db();
+      // Only overwrite the customer id when given one (checkout) — a cancel event
+      // flips the plan to free but must keep the id so the user can still resubscribe.
+      const set = stripeCustomerId ? { plan, stripeCustomerId } : { plan };
+      await d.update(projects).set(set).where(eq(projects.id, projectId));
+      cache.clear();
+    },
+
     async listProjects(owner) {
       const d = await db();
       const projs = await d.select().from(projects).where(eq(projects.owner, owner));
@@ -156,6 +169,7 @@ export function makeControlPlane(env: Record<string, string | undefined>): Contr
         projectId: p.id,
         name: p.name,
         plan: p.plan as PlanId,
+        stripeCustomerId: p.stripeCustomerId,
         createdAt: p.createdAt,
         keys: byProj.get(p.id) ?? [],
       }));

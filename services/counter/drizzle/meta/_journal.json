@@ -15,6 +15,13 @@
       "when": 1782478497583,
       "tag": "0001_bright_the_santerians",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782511098171,
+      "tag": "0002_left_brood",
+      "breakpoints": true
     }
   ]
 }

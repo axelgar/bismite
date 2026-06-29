@@ -6,16 +6,25 @@ so waiting costs little. Newest first.
 
 ## Security / billing
 
-### 🔴 Plan upgrades are FREE self-serve until Stripe (#6) gates them
-- **Now:** the dashboard's `PlanSelect` → `setPlanAction` lets any logged-in user set
-  their project to Pro/Enterprise with **no payment**. It's the pre-Stripe manual tier
-  lever (#5) and nullifies MTU enforcement with one click.
-- **Why it's currently safe:** signup is **invite-only** (`SIGNUP_ALLOWLIST`), so only
-  trusted beta users can reach it.
-- **Must do before opening signup:** #6 gates *upgrades* behind Stripe Checkout
-  (downgrades can stay free). Until then, do NOT remove the signup allowlist.
-- **Where:** `apps/dashboard/app/dashboard/[projectId]/plan-select.tsx`,
-  `apps/dashboard/app/dashboard/actions.ts` (`setPlanAction`, marked `TODO(#6)`).
+### ✅ #6 — plan upgrades gated behind Stripe (DONE in working tree, pending go-live config)
+- **Done:** the free self-serve `setPlanAction` is gone. Plan is now flipped **only** by
+  the signature-verified Stripe webhook (`app/api/stripe/webhook`). Free→Pro via Checkout
+  (`checkoutAction`), Pro→Free via the Customer Portal cancel (`portalAction`). Enterprise
+  is "contact sales" (custom, per PRD §8). Counter stores `stripe_customer_id` and exposes
+  `POST /v1/projects/billing` (admin) for the webhook; `setPlan` stays a manual/seed lever.
+- **Stripe (TEST mode, acct `acct_1TlOH7PRWiCu5oTF`):** product `Bismite Pro`
+  (`prod_UmGXtJoPy3UkJf`), price `price_1Tmi0EPRWiCu5oTFcADiXJdN` — **placeholder €49/mo,
+  replace after price validation** (PRD §8: "do not anchor low"; make a new price, update
+  `STRIPE_PRICE_PRO`).
+- **Before opening signup / removing `SIGNUP_ALLOWLIST`, finish go-live:**
+  1. Set `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` (and `STRIPE_PRICE_PRO`) in the
+     dashboard's Vercel env (live keys in prod), redeploy.
+  2. Register the prod webhook endpoint (`https://app.bismite.dev/api/stripe/webhook`) in
+     Stripe for `checkout.session.completed`, `customer.subscription.deleted|updated`.
+  3. Validate the Pro price and swap the placeholder.
+- **Where:** `apps/dashboard/lib/stripe.ts`, `app/dashboard/actions.ts`,
+  `app/api/stripe/webhook/route.ts`, `app/dashboard/[projectId]/plan-select.tsx`;
+  counter `src/{schema,db,core}.ts` + `drizzle/0002_left_brood.sql`.
 
 ## Hosted counter — performance & scale
 

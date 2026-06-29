@@ -36,6 +36,24 @@ test("projects default to the free plan; setPlan changes what the hot path resol
   assert.equal(view.plan, "pro");
 });
 
+test("setBilling: stores the Stripe customer id on upgrade, keeps it on cancel (#6)", async () => {
+  const owner = "u-billing";
+  const { projectId } = await cp.createProject("billed", owner);
+
+  // Checkout completes => Pro + customer id stored.
+  await cp.setBilling(projectId, "pro", "cus_123");
+  let [view] = await cp.listProjects(owner);
+  assert.equal(view.plan, "pro");
+  assert.equal(view.stripeCustomerId, "cus_123");
+
+  // Cancel (no customer id passed) => back to Free, but the id is retained so the user
+  // can reopen the Customer Portal / resubscribe onto the same Stripe customer.
+  await cp.setBilling(projectId, "free");
+  [view] = await cp.listProjects(owner);
+  assert.equal(view.plan, "free");
+  assert.equal(view.stripeCustomerId, "cus_123", "customer id retained across cancel");
+});
+
 test("regenerate replaces the key for a mode and invalidates the old one", async () => {
   const { projectId, test: oldKey, live: liveKey } = await cp.createProject("bravo", "u2");
   assert.deepEqual(await cp.resolveKey(oldKey), { projectId, mode: "test", plan: "free" }); // warms cache too

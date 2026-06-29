@@ -7,9 +7,13 @@ export const projects = pgTable("projects", {
   id: text("id").primaryKey(), // proj_<hex>
   name: text("name").notNull().default(""),
   owner: text("owner").notNull().default(""),
-  // Billing tier (PRD §8). Settable manually/by seed for now; #6 flips it via Stripe.
+  // Billing tier (PRD §8). Flipped by the Stripe webhook (#6) via setBilling; the
+  // /v1/projects/plan admin lever still works for seeds and negotiated Enterprise deals.
   // Limits live in code (src/plans.ts), so this is just the tier id — easy to change.
   plan: text("plan").notNull().default("free"),
+  // Stripe customer id (#6), set on first checkout. Lets the dashboard open the Customer
+  // Portal (card/cancel) for a returning paid user. Null until they buy something.
+  stripeCustomerId: text("stripe_customer_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

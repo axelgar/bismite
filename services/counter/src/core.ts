@@ -120,6 +120,24 @@ export function createHandler(cp: ControlPlane, store: Store, adminToken?: strin
         return json(200, { projectId, plan });
       }
 
+      // --- Admin: Stripe-authoritative tier flip (#6). Called by the dashboard's verified
+      // webhook: sets plan and (on first checkout) the stripe customer id together. ---
+      if (req.method === "POST" && path.endsWith("/v1/projects/billing")) {
+        if (!isAdmin) return json(401, { error: "admin only" });
+        const b = await body();
+        if (!b.ok) return;
+        const { projectId, plan, stripeCustomerId } = b.data ?? {};
+        if (typeof projectId !== "string" || typeof plan !== "string" || !(plan in PLANS)) {
+          return json(400, { error: "projectId and plan (free|pro|enterprise) required" });
+        }
+        await cp.setBilling(
+          projectId,
+          plan as PlanId,
+          typeof stripeCustomerId === "string" ? stripeCustomerId : undefined,
+        );
+        return json(200, { projectId, plan });
+      }
+
       // Dashboard read path: a user's projects (+ key metadata, no secrets). The
       // dashboard passes the logged-in user as ?owner, then scopes its whole UI to this.
       if (req.method === "GET" && path.endsWith("/v1/projects")) {

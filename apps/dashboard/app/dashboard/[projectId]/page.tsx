@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/session";
 import { ownedProject, usageSummary, type Mode } from "@/lib/counter";
 import { planFor } from "@/lib/plans";
+import { billingEnabled } from "@/lib/stripe";
 import { Regenerate } from "./regenerate";
 import { PlanSelect } from "./plan-select";
 
@@ -45,7 +46,7 @@ export default async function ProjectDetail({ params }: { params: Promise<{ proj
 
       <h2>Usage · {usage.period}</h2>
       <div className="card">
-        <PlanSelect projectId={projectId} plan={plan.id} />
+        <PlanSelect projectId={projectId} plan={plan.id} billingEnabled={billingEnabled} />
         <Meter label="Monthly Tracked Users" used={usage.mtu} limit={plan.mtu} />
         <Meter label="Calls" used={usage.calls} limit={plan.calls} />
         <p className="muted">

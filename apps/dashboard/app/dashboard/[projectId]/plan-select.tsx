@@ -1,33 +1,52 @@
 "use client";
 import { useState, useTransition } from "react";
-import { setPlanAction } from "../actions";
-import { PLAN_IDS, PLANS, type PlanId } from "@/lib/plans";
+import { checkoutAction, portalAction } from "../actions";
+import { PLANS, type PlanId } from "@/lib/plans";
 
-// Manual tier flip (PRD §8: settable for now; #6 flips it via Stripe Checkout). Changing
-// it re-meters the project against the new allowance — the demo's "bump to pro" lever.
-export function PlanSelect({ projectId, plan }: { projectId: string; plan: PlanId }) {
-  const [current, setCurrent] = useState<PlanId>(plan);
+// #6: upgrades go through Stripe Checkout, never a free flip. Free => "Upgrade to Pro"
+// (Checkout); Pro => "Manage billing" (Customer Portal: change card / cancel => downgrade);
+// Enterprise is custom (PRD §8) so it's a sales contact, not self-serve.
+const SALES = "tech@studioapp.co?subject=Bismite%20Enterprise";
+
+export function PlanSelect({
+  projectId,
+  plan,
+  billingEnabled,
+}: {
+  projectId: string;
+  plan: PlanId;
+  billingEnabled: boolean;
+}) {
   const [pending, start] = useTransition();
+  const [err, setErr] = useState<string>();
+
+  // Each action redirects to Stripe on success; only the failure path returns an {error}.
+  const run = (fn: (id: string) => Promise<{ error: string } | void>) => () =>
+    start(async () => {
+      const r = await fn(projectId);
+      if (r?.error) setErr(r.error);
+    });
+
   return (
-    <label className="row">
-      <strong>Plan</strong>
-      <select
-        value={current}
-        disabled={pending}
-        onChange={(e) => {
-          const next = e.target.value as PlanId;
-          setCurrent(next);
-          start(() => {
-            setPlanAction(projectId, next);
-          });
-        }}
-      >
-        {PLAN_IDS.map((id) => (
-          <option key={id} value={id}>
-            {PLANS[id].name}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div className="row">
+      <strong>Plan: {PLANS[plan].name}</strong>
+      <span className="row" style={{ gap: 8 }}>
+        {plan === "free" && (
+          <>
+            <button onClick={run(checkoutAction)} disabled={pending || !billingEnabled}>
+              {billingEnabled ? "Upgrade to Pro" : "Billing not configured"}
+            </button>
+            <a href={`mailto:${SALES}`}>Enterprise? Contact sales</a>
+          </>
+        )}
+        {plan === "pro" && (
+          <button onClick={run(portalAction)} disabled={pending}>
+            Manage billing
+          </button>
+        )}
+        {plan === "enterprise" && <a href={`mailto:${SALES}`}>Manage with sales</a>}
+        {err && <span style={{ color: "#dc2626" }}>{err}</span>}
+      </span>
+    </div>
   );
 }

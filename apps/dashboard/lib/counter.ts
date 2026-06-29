@@ -14,6 +14,7 @@ export interface ProjectView {
   projectId: string;
   name: string;
   plan: PlanId;
+  stripeCustomerId: string | null;
   createdAt: string;
   keys: Array<{ mode: Mode; createdAt: string; lastUsedAt: string | null }>;
 }
@@ -60,6 +61,16 @@ export function setPlan(projectId: string, plan: PlanId) {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ projectId, plan }),
+  });
+}
+
+/** Stripe-authoritative tier flip (#6) — called only from the verified webhook, which
+ *  is the single writer of paid plans. `setPlan` stays the manual admin/seed lever. */
+export function setBilling(projectId: string, plan: PlanId, stripeCustomerId?: string) {
+  return call<{ projectId: string; plan: PlanId }>(`/v1/projects/billing`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ projectId, plan, stripeCustomerId }),
   });
 }
 
