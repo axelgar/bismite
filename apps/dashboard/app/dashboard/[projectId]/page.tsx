@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { requireUser } from "@/lib/session";
-import { ownedProject, usageSummary } from "@/lib/counter";
+import { requireOrg } from "@/lib/session";
+import { ownedProject, usageSummary, usageHistory } from "@/lib/counter";
 import { planFor } from "@/lib/plans";
 import { billingEnabled } from "@/lib/stripe";
 import { TopBar } from "@/components/top-bar";
@@ -18,10 +18,12 @@ export default async function ProjectDetail({
 }) {
   const { projectId } = await params;
   const { upgraded } = await searchParams;
-  const user = await requireUser();
-  const project = await ownedProject(user.id, projectId);
+  const { user, orgId } = await requireOrg();
+  const project = await ownedProject(orgId, projectId);
   if (!project) notFound();
   const usage = await usageSummary(projectId);
+  // Charts are non-critical: a snapshot-history blip must not 500 the project page.
+  const history = await usageHistory(projectId).catch(() => []);
   const plan = planFor(project.plan);
 
   return (
@@ -46,8 +48,9 @@ export default async function ProjectDetail({
           period={usage.period}
           mtu={usage.mtu}
           calls={usage.calls}
-          mtuLimit={plan.mtu}
-          callsLimit={plan.calls}
+          history={history}
+          mtuLimit={plan.mtuIncluded}
+          callsLimit={plan.callsCeiling}
           planId={plan.id}
           planName={plan.name}
           keys={project.keys.map((k) => ({ mode: k.mode, lastUsedAt: k.lastUsedAt }))}

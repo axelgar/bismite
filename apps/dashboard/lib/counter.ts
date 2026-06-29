@@ -23,6 +23,11 @@ export interface UsageSummary {
   calls: number;
   period: string;
 }
+export interface UsageSnapshot {
+  date: string; // YYYY-MM-DD
+  mtu: number;
+  calls: number;
+}
 
 const headers = (): Record<string, string> => (ADMIN ? { authorization: `Bearer ${ADMIN}` } : {});
 
@@ -36,15 +41,15 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return (await r.json()) as T;
 }
 
-export function listProjects(owner: string) {
-  return call<ProjectView[]>(`/v1/projects?owner=${encodeURIComponent(owner)}`);
+export function listProjects(orgId: string) {
+  return call<ProjectView[]>(`/v1/projects?org=${encodeURIComponent(orgId)}`);
 }
 
-export function createProject(name: string, owner: string) {
+export function createProject(name: string, orgId: string) {
   return call<{ projectId: string; test: string; live: string }>(`/v1/projects`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name, owner }),
+    body: JSON.stringify({ name, org: orgId }),
   });
 }
 
@@ -78,9 +83,15 @@ export function usageSummary(projectId: string) {
   return call<UsageSummary>(`/v1/usage/summary?projectId=${encodeURIComponent(projectId)}`);
 }
 
-/** Ownership check — every mutation/read for a specific projectId goes through this so a
- *  user can never touch a project they don't own (regenerate takes only a projectId). */
-export async function ownedProject(owner: string, projectId: string): Promise<ProjectView | null> {
-  const mine = await listProjects(owner);
-  return mine.find((p) => p.projectId === projectId) ?? null;
+/** Daily snapshot history (oldest first) for the trend charts (observability PRD-C). */
+export function usageHistory(projectId: string) {
+  return call<UsageSnapshot[]>(`/v1/usage/history?projectId=${encodeURIComponent(projectId)}`);
+}
+
+/** Authz check — every mutation/read for a specific projectId goes through this so a
+ *  caller can never touch a project outside their active org (regenerate takes only a
+ *  projectId). Scoped to the org, not the user: teammates share their org's projects. */
+export async function ownedProject(orgId: string, projectId: string): Promise<ProjectView | null> {
+  const ours = await listProjects(orgId);
+  return ours.find((p) => p.projectId === projectId) ?? null;
 }

@@ -1,9 +1,21 @@
 // better-auth server instance — buy auth, don't build it (PRD §9). Email+password for v1.
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { organization } from "better-auth/plugins";
 import { APIError } from "better-auth/api";
+import { randomBytes } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { db } from "./db";
+import { member } from "../auth-schema";
 import { sendEmail } from "./email";
+
+// Personal-org slug: email local-part, alnum-only, + a short random suffix so two
+// "alex@…" signups never collide on the unique slug. ponytail: random suffix, not a
+// uniqueness retry loop — collisions at 4 hex bytes are not a problem at our scale.
+function personalOrgSlug(email: string): string {
+  const base = email.split("@")[0].toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "org";
+  return `${base}-${randomBytes(4).toString("hex")}`;
+}
 
 // Minimal branded HTML for the transactional emails (better-auth hands us a ready `url`).
 const emailHtml = (intro: string, label: string, url: string) =>
@@ -52,6 +64,10 @@ export const auth = betterAuth({
       );
     },
   },
+  // Everything is an org (PRD-v2a §1). Default roles owner/admin/member match the PRD's
+  // three exactly, so no custom access-control here — who-can-touch-keys/billing is
+  // enforced app-side in the dashboard. Invitation email wiring lands with the team UI.
+  plugins: [organization()],
   databaseHooks: {
     user: {
       create: {
@@ -60,6 +76,27 @@ export const auth = betterAuth({
             throw new APIError("FORBIDDEN", { message: "This email isn’t on the invite list yet." });
           }
           return { data: user };
+        },
+        // Auto-create a personal org so a solo dev is an org-of-one from signup — same
+        // code path as a real team. createOrganization adds the user as `owner` member.
+        after: async (user) => {
+          await auth.api.createOrganization({
+            body: { name: `${user.name}’s Org`, slug: personalOrgSlug(user.email), userId: user.id },
+          });
+        },
+      },
+    },
+    // On login, default the session's active org to the user's first membership so every
+    // "this org's projects" query has an org to scope to without a manual pick.
+    session: {
+      create: {
+        before: async (session) => {
+          const [m] = await db
+            .select({ orgId: member.organizationId })
+            .from(member)
+            .where(eq(member.userId, session.userId))
+            .limit(1);
+          return { data: { ...session, activeOrganizationId: m?.orgId ?? null } };
         },
       },
     },

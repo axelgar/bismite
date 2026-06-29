@@ -22,6 +22,20 @@
       "when": 1782511098171,
       "tag": "0002_left_brood",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1782742128016,
+      "tag": "0003_bored_maverick",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1782742660362,
+      "tag": "0004_org_rename",
+      "breakpoints": true
     }
   ]
 }

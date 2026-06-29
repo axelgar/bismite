@@ -4,7 +4,7 @@
 import { randomBytes, createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { eq, inArray } from "drizzle-orm";
-import { apiKeys, projects } from "./schema.js";
+import { apiKeys, projects, usageSnapshots } from "./schema.js";
 import type { PlanId } from "./plans.js";
 
 export type Mode = "test" | "live";
@@ -23,8 +23,8 @@ export interface ControlPlane {
   /** Bearer key -> {project, mode, plan}, cached; null => unknown/revoked (=> 401).
    *  Plan rides along so the hot path can enforce tier limits without a second lookup. */
   resolveKey(rawKey: string): Promise<{ projectId: string; mode: Mode; plan: PlanId } | null>;
-  /** Create a project and mint both keys. Secrets are returned ONCE, here only. */
-  createProject(name: string, owner: string): Promise<{ projectId: string; test: string; live: string }>;
+  /** Create a project (under an org) and mint both keys. Secrets are returned ONCE, here only. */
+  createProject(name: string, orgId: string): Promise<{ projectId: string; test: string; live: string }>;
   /** Replace a project's key for one mode; old key stops resolving. Returns the new secret. */
   regenerate(projectId: string, mode: Mode): Promise<string>;
   /** Set a project's billing tier; the hot path picks it up on the next resolve. */
@@ -32,9 +32,16 @@ export interface ControlPlane {
   /** Stripe-authoritative tier flip (#6): set plan and, when a checkout first creates
    *  one, the customer id. Called only by the dashboard's verified Stripe webhook. */
   setBilling(projectId: string, plan: PlanId, stripeCustomerId?: string): Promise<void>;
-  /** Projects owned by `owner` (+ key metadata, no secrets). The dashboard scopes
-   *  every view to the logged-in user via this — it's the per-user authz boundary. */
-  listProjects(owner: string): Promise<ProjectView[]>;
+  /** Projects belonging to `orgId` (+ key metadata, no secrets). The dashboard scopes
+   *  every view to the active org via this — it's the per-org authz boundary. */
+  listProjects(orgId: string): Promise<ProjectView[]>;
+  /** Every project id (all owners) — the snapshot cron iterates these to meter all. */
+  listAllProjectIds(): Promise<string[]>;
+  /** Idempotent upsert of one day's snapshot (observability PRD-C). Keyed on
+   *  (project_id, date), so re-running the cron the same day overwrites the row. */
+  recordSnapshot(projectId: string, date: string, mtu: number, calls: number): Promise<void>;
+  /** A project's daily snapshots, oldest first — the trend-chart read path (PRD-C #5). */
+  listSnapshots(projectId: string): Promise<Array<{ date: string; mtu: number; calls: number }>>;
 }
 
 const hash = (key: string) => createHash("sha256").update(key).digest("hex");
@@ -96,10 +103,10 @@ export function makeControlPlane(env: Record<string, string | undefined>): Contr
       return val;
     },
 
-    async createProject(name, owner) {
+    async createProject(name, orgId) {
       const d = await db();
       const projectId = id("proj");
-      await d.insert(projects).values({ id: projectId, name, owner });
+      await d.insert(projects).values({ id: projectId, name, orgId });
       const test = secret("test");
       const live = secret("live");
       await d.insert(apiKeys).values([
@@ -143,9 +150,9 @@ export function makeControlPlane(env: Record<string, string | undefined>): Contr
       cache.clear();
     },
 
-    async listProjects(owner) {
+    async listProjects(orgId) {
       const d = await db();
-      const projs = await d.select().from(projects).where(eq(projects.owner, owner));
+      const projs = await d.select().from(projects).where(eq(projects.orgId, orgId));
       if (projs.length === 0) return [];
       // Two queries + group in JS — clearer than a join and the row counts are tiny
       // (a dev's handful of projects, ≤2 keys each). Secrets are never selected.
@@ -173,6 +180,34 @@ export function makeControlPlane(env: Record<string, string | undefined>): Contr
         createdAt: p.createdAt,
         keys: byProj.get(p.id) ?? [],
       }));
+    },
+
+    async listAllProjectIds() {
+      const d = await db();
+      const rows = await d.select({ id: projects.id }).from(projects);
+      return rows.map((r) => r.id);
+    },
+
+    async recordSnapshot(projectId, date, mtu, calls) {
+      const d = await db();
+      // Single upsert on the composite PK — atomic, so it's safe under neon-http's
+      // no-transaction prod driver and idempotent on cron re-runs within a day.
+      await d
+        .insert(usageSnapshots)
+        .values({ projectId, date, mtu, calls })
+        .onConflictDoUpdate({
+          target: [usageSnapshots.projectId, usageSnapshots.date],
+          set: { mtu, calls },
+        });
+    },
+
+    async listSnapshots(projectId) {
+      const d = await db();
+      return d
+        .select({ date: usageSnapshots.date, mtu: usageSnapshots.mtu, calls: usageSnapshots.calls })
+        .from(usageSnapshots)
+        .where(eq(usageSnapshots.projectId, projectId))
+        .orderBy(usageSnapshots.date);
     },
   };
 }

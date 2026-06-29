@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireUser } from "@/lib/session";
+import { requireOrg } from "@/lib/session";
 import * as counter from "@/lib/counter";
 import { stripe, billingEnabled, PRICE_PRO } from "@/lib/stripe";
 
@@ -11,18 +11,18 @@ const APP_URL = process.env.BETTER_AUTH_URL ?? "http://localhost:3001";
 // never persisted, never re-fetchable (the counter only stores hashes).
 
 export async function createProjectAction(name: string) {
-  const user = await requireUser();
+  const { orgId } = await requireOrg();
   const clean = name.trim();
   if (!clean) return { error: "Name is required" as const };
-  const out = await counter.createProject(clean, user.id);
+  const out = await counter.createProject(clean, orgId);
   revalidatePath("/dashboard");
   return { projectId: out.projectId, test: out.test, live: out.live };
 }
 
 export async function regenerateAction(projectId: string, mode: counter.Mode) {
-  const user = await requireUser();
-  // Ownership gate: regenerate takes only a projectId, so confirm it's the user's first.
-  if (!(await counter.ownedProject(user.id, projectId))) return { error: "Not found" as const };
+  const { orgId } = await requireOrg();
+  // Authz gate: regenerate takes only a projectId, so confirm it's in the active org first.
+  if (!(await counter.ownedProject(orgId, projectId))) return { error: "Not found" as const };
   const { key } = await counter.regenerate(projectId, mode);
   revalidatePath(`/dashboard/${projectId}`);
   return { mode, key };
@@ -34,8 +34,8 @@ export async function regenerateAction(projectId: string, mode: counter.Mode) {
 // free self-serve setPlan anymore; counter.setPlan stays an admin/seed lever only.
 
 export async function checkoutAction(projectId: string) {
-  const user = await requireUser();
-  const project = await counter.ownedProject(user.id, projectId);
+  const { user, orgId } = await requireOrg();
+  const project = await counter.ownedProject(orgId, projectId);
   if (!project) return { error: "Not found" as const };
   if (!billingEnabled) return { error: "Billing is not configured" as const };
 
@@ -57,8 +57,8 @@ export async function checkoutAction(projectId: string) {
 }
 
 export async function portalAction(projectId: string) {
-  const user = await requireUser();
-  const project = await counter.ownedProject(user.id, projectId);
+  const { orgId } = await requireOrg();
+  const project = await counter.ownedProject(orgId, projectId);
   if (!project) return { error: "Not found" as const };
   if (!project.stripeCustomerId) return { error: "No billing account yet" as const };
 

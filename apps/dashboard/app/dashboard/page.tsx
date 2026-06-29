@@ -1,18 +1,18 @@
 import Link from "next/link";
 import { ChevronRight, FolderPlus, KeyRound } from "lucide-react";
-import { requireUser } from "@/lib/session";
+import { requireOrg } from "@/lib/session";
 import { listProjects } from "@/lib/counter";
 import { TopBar } from "@/components/top-bar";
 import { CreateProject } from "./create-project";
 import { SignOut } from "./sign-out";
 
 export default async function Dashboard() {
-  const user = await requireUser();
+  const { user, orgId } = await requireOrg();
   // Degrade gracefully: a counter outage/misconfig shows a banner, not a white-screen 500.
   let projects: Awaited<ReturnType<typeof listProjects>> = [];
   let loadError = false;
   try {
-    projects = await listProjects(user.id);
+    projects = await listProjects(orgId);
   } catch {
     loadError = true;
   }

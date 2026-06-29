@@ -4,7 +4,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ControlPlane, Mode } from "./db.js";
 import { PLANS, planFor, type PlanId } from "./plans.js";
-import { meter, summary, rateLimited } from "./metering.js";
+import { meter, summary, rateLimited, utcDay, mtuCeilingBlock, type BlockedReason } from "./metering.js";
 
 /** Tenant + mode namespace: a key from project A can never read/write project B's
  *  counts, and a project's `test` traffic is isolated from its `live` counts. */
@@ -20,6 +20,9 @@ export interface Store {
   addMember(key: string, member: string, ttlSeconds?: number): Promise<void>;
   /** SCARD — set cardinality (e.g. distinct MTU users this period). */
   setSize(key: string): Promise<number>;
+  /** SISMEMBER — is `member` already in the set? Lets the MTU ceiling pass an
+   *  already-counted user without adding a new one (the "never evict" rule). */
+  isMember(key: string, member: string): Promise<boolean>;
 }
 
 // ~40-day TTL: outlives a calendar-month bucket, then the key self-deletes.
@@ -64,7 +67,13 @@ async function readJson(req: IncomingMessage): Promise<any> {
  *  Paths are matched by suffix so it works whether the host serves `/v1/usage` or
  *  rewrites it under `/api`. `adminToken` guards key issuance (unset => open, for
  *  local dev; the dashboard + better-auth own real issuance authz in hosted #4). */
-export function createHandler(cp: ControlPlane, store: Store, adminToken?: string, rateLimitPerMin = 0) {
+export function createHandler(
+  cp: ControlPlane,
+  store: Store,
+  adminToken?: string,
+  rateLimitPerMin = 0,
+  cronSecret?: string,
+) {
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const json = (code: number, body: unknown) => {
       res.writeHead(code, { "content-type": "application/json" });
@@ -91,8 +100,8 @@ export function createHandler(cp: ControlPlane, store: Store, adminToken?: strin
         if (!isAdmin) return json(401, { error: "admin only" });
         const b = await body();
         if (!b.ok) return;
-        const { name = "", owner = "" } = b.data ?? {};
-        const out = await cp.createProject(String(name), String(owner));
+        const { name = "", org = "" } = b.data ?? {};
+        const out = await cp.createProject(String(name), String(org));
         return json(200, out); // secrets revealed once, here only
       }
 
@@ -138,11 +147,11 @@ export function createHandler(cp: ControlPlane, store: Store, adminToken?: strin
         return json(200, { projectId, plan });
       }
 
-      // Dashboard read path: a user's projects (+ key metadata, no secrets). The
-      // dashboard passes the logged-in user as ?owner, then scopes its whole UI to this.
+      // Dashboard read path: an org's projects (+ key metadata, no secrets). The dashboard
+      // passes the session's active org as ?org, then scopes its whole UI to this.
       if (req.method === "GET" && path.endsWith("/v1/projects")) {
         if (!isAdmin) return json(401, { error: "admin only" });
-        return json(200, await cp.listProjects(url.searchParams.get("owner") ?? ""));
+        return json(200, await cp.listProjects(url.searchParams.get("org") ?? ""));
       }
 
       // Dashboard read path: usage by projectId behind the admin token. Keys are
@@ -151,6 +160,30 @@ export function createHandler(cp: ControlPlane, store: Store, adminToken?: strin
       if (req.method === "GET" && path.endsWith("/v1/usage/summary") && url.searchParams.has("projectId")) {
         if (!isAdmin) return json(401, { error: "admin only" });
         return json(200, await summary(store, url.searchParams.get("projectId")!));
+      }
+
+      // Dashboard read path: a project's daily snapshot history for trend charts
+      // (observability PRD-C #5). Admin-guarded, by projectId — same shape as the
+      // summary read above; the dashboard scopes to the owner before calling.
+      if (req.method === "GET" && path.endsWith("/v1/usage/history") && url.searchParams.has("projectId")) {
+        if (!isAdmin) return json(401, { error: "admin only" });
+        return json(200, await cp.listSnapshots(url.searchParams.get("projectId")!));
+      }
+
+      // Cron: persist today's MTU/calls for every project so trend is queryable
+      // (observability PRD-C). GET because Vercel cron issues GETs; guarded by the
+      // admin token OR Vercel's CRON_SECRET bearer. Idempotent per (project, day),
+      // so an extra invocation just overwrites today's row.
+      if (req.method === "GET" && path.endsWith("/v1/snapshots/run")) {
+        const isCron = !!cronSecret && bearer(req.headers.authorization) === cronSecret;
+        if (!isAdmin && !isCron) return json(401, { error: "admin or cron only" });
+        const day = utcDay();
+        const ids = await cp.listAllProjectIds();
+        for (const id of ids) {
+          const s = await summary(store, id);
+          await cp.recordSnapshot(id, day, s.mtu, s.calls);
+        }
+        return json(200, { day, projects: ids.length });
       }
 
       // --- Usage: authed by the project's API key -> {project, mode} or 401. ---
@@ -176,7 +209,24 @@ export function createHandler(cp: ControlPlane, store: Store, adminToken?: strin
       // Over the tier's MTU allowance => surface an over-limit signal (PRD §8: MTU is the
       // headline limit). It's advisory only — we never block, so fail-open holds and the
       // app just shows "upgrade". Calls are a guardrail (overage in #6), not blocked here.
-      const overMtu = (m: { mtu: number; calls: number } | null) => !!m && m.mtu > plan.mtu;
+      const overMtu = (m: { mtu: number; calls: number } | null) => !!m && m.mtu > plan.mtuIncluded;
+
+      // Free hard ceiling (PRD v2/B): tiers with NO overage cap MTU hard; tiers that bill
+      // overage (Pro) pass Infinity => never blocked here. Confirmed block only — any store
+      // error throws inside mtuCeilingBlock and we swallow it to fail OPEN (never block on
+      // doubt; the block must be a positive signal, never the absence of one).
+      // ponytail: this adds a SCARD (+ a SISMEMBER only when at the ceiling) ahead of
+      // meter() on the live hot path. Folds into the Upstash pipeline batch when that
+      // BACKLOG item lands; until then it's 1–2 extra REST ops on confirmed-over Free.
+      const mtuCeiling = plan.mtuOveragePer1k == null ? plan.mtuIncluded : Infinity;
+      const safeBlock = async (key: string): Promise<BlockedReason | null> => {
+        try {
+          return await mtuCeilingBlock(store, projectId, mode, key, mtuCeiling);
+        } catch (e) {
+          console.error("block check error:", e);
+          return null; // FAIL-OPEN
+        }
+      };
 
       // Per-project rate limit on the counter hot path (not the dashboard summary).
       const isCounterCall = path.endsWith("/v1/usage/increment") || path.endsWith("/v1/usage");
@@ -196,6 +246,11 @@ export function createHandler(cp: ControlPlane, store: Store, adminToken?: strin
         if (typeof amount !== "number" || !Number.isFinite(amount)) {
           return json(400, { error: "invalid amount" });
         }
+        // Refuse a new user past the Free ceiling BEFORE counting them anywhere — neither
+        // the dev's own end-user counter nor the MTU set moves. 200 (not 4xx) so the SDK
+        // surfaces `blocked` instead of treating it as a fail-open transient.
+        const blocked = await safeBlock(key);
+        if (blocked) return json(200, { used: await store.read(nsKey(projectId, mode, key)), blocked });
         const used = await store.increment(nsKey(projectId, mode, key), amount);
         const m = await recordUsage(key);
         return json(200, { used, overLimit: overMtu(m) });
@@ -205,6 +260,8 @@ export function createHandler(cp: ControlPlane, store: Store, adminToken?: strin
         const key = url.searchParams.get("key");
         if (!key) return json(400, { error: "missing key" });
         const used = await store.read(nsKey(projectId, mode, key));
+        const blocked = await safeBlock(key);
+        if (blocked) return json(200, { used, blocked });
         const m = await recordUsage(key);
         return json(200, { used, overLimit: overMtu(m) });
       }
@@ -245,6 +302,9 @@ export function makeStore(env: Record<string, string | undefined>): Store {
       async setSize(k) {
         return sets.get(k)?.size ?? 0;
       },
+      async isMember(k, member) {
+        return sets.get(k)?.has(member) ?? false;
+      },
     };
   }
   const cmd = async (parts: (string | number)[]): Promise<unknown> => {
@@ -271,6 +331,9 @@ export function makeStore(env: Record<string, string | undefined>): Store {
     },
     async setSize(k) {
       return Number((await cmd(["SCARD", k])) ?? 0);
+    },
+    async isMember(k, member) {
+      return Number((await cmd(["SISMEMBER", k, member])) ?? 0) === 1;
     },
   };
 }
