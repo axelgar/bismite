@@ -126,9 +126,9 @@ export function PlanSection({
               )}
               <div className="font-semibold">{p.name}</div>
               <div className="mt-2 font-mono text-xs leading-relaxed text-muted-foreground">
-                {fmtAllowance(p.mtu)} MTU
+                {fmtAllowance(p.mtuIncluded)} MTU
                 <br />
-                {fmtAllowance(p.calls)} calls
+                {fmtAllowance(p.callsCeiling)} calls
               </div>
 
               <div className="mt-4">

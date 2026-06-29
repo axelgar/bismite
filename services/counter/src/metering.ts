@@ -14,6 +14,11 @@ export function period(now = new Date()): string {
   return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
+/** UTC calendar day (YYYY-MM-DD) — the snapshot bucket for daily usage history. */
+export function utcDay(now = new Date()): string {
+  return now.toISOString().slice(0, 10);
+}
+
 /** Pull the userId out of an SDK counter key. The userId is everything before the
  *  trailing `:feature:period`, so we slice from the end — that tolerates userIds
  *  which themselves contain ':'.
@@ -26,6 +31,34 @@ export function extractUser(counterKey: string): string {
 
 const mtuKey = (proj: string, p: string) => `${proj}:mtu:${p}`;
 const callsKey = (proj: string, p: string) => `${proj}:calls:${p}`;
+
+// Hard-block reasons Bismite itself returns (PRD v2/B). Mirrors the SDK's BlockedReason
+// (packages/sdk) — kept as a local copy, like the plans mirror, to avoid coupling the
+// counter deploy to the SDK package.
+export type BlockedReason = "bismite_free_limit" | "bismite_test_limit" | "bismite_calls_ceiling";
+
+/** The humane MTU hard-ceiling gate for tiers with NO overage (Free): once the period's
+ *  distinct-user set is at `ceiling`, refuse a genuinely-NEW user but always let an
+ *  already-counted user through (never evict mid-month). Returns the block reason, or
+ *  null to proceed. Run BEFORE `meter()` so a refused user is never added/counted.
+ *  Tiers that bill overage (Pro) pass Infinity => never blocks here (that's #6/#8).
+ *  A thrown store error bubbles to the caller, which fails open (no block on doubt). */
+export async function mtuCeilingBlock(
+  store: Store,
+  projectId: string,
+  mode: Mode,
+  counterKey: string,
+  ceiling: number,
+  now = new Date(),
+): Promise<BlockedReason | null> {
+  if (mode !== "live" || !isFinite(ceiling)) return null; // test cap is separate (#3)
+  const key = mtuKey(projectId, period(now));
+  // size < ceiling => room for one more, even a new user (e.g. the 1,000th on Free).
+  if ((await store.setSize(key)) < ceiling) return null;
+  // At/over the ceiling: only users already counted this period may pass.
+  if (await store.isMember(key, extractUser(counterKey))) return null;
+  return "bismite_free_limit"; // a new user past the ceiling (e.g. the 1,001st on Free)
+}
 
 /** Feed the two billing meters for one live counter op (a check or a record), and
  *  return the running period totals so the caller can apply tier enforcement.

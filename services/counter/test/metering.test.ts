@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeStore } from "../src/core.js";
-import { extractUser, period, meter, summary, rateLimited } from "../src/metering.js";
+import { extractUser, period, meter, summary, rateLimited, mtuCeilingBlock } from "../src/metering.js";
+import type { Store } from "../src/core.js";
 
 const JUNE = new Date("2026-06-15T12:00:00Z");
 
@@ -50,6 +51,40 @@ test("metrics are per-project and per-period (no cross-bleed)", async () => {
   assert.equal((await summary(s, "proj_x", JUNE)).mtu, 1, "proj_x sees only its own user");
   assert.equal((await summary(s, "proj_y", JUNE)).calls, 1);
   assert.equal((await summary(s, "proj_x", may)).mtu, 1, "May bucket is separate from June");
+});
+
+test("mtuCeilingBlock: refuses a NEW user at the ceiling, always passes an existing one", async () => {
+  const s = makeStore({});
+  const proj = "proj_free";
+  const ceiling = 3; // tiny stand-in for the Free 1,000
+  for (let i = 0; i < ceiling; i++) await meter(s, proj, "live", `u${i}:chat:2026-06`, JUNE); // fill to ceiling
+
+  // At the ceiling: an already-counted user still passes (never evict mid-month).
+  assert.equal(await mtuCeilingBlock(s, proj, "live", "u1:chat:2026-06", ceiling, JUNE), null);
+  // A genuinely-new user past the ceiling is refused (e.g. the 1,001st on Free).
+  assert.equal(
+    await mtuCeilingBlock(s, proj, "live", "u-new:chat:2026-06", ceiling, JUNE),
+    "bismite_free_limit",
+  );
+  // Test mode is never MTU-blocked here (the test cap is a separate set, #3).
+  assert.equal(await mtuCeilingBlock(s, proj, "test", "u-new:chat:2026-06", ceiling, JUNE), null);
+  // An Infinity ceiling (overage/enterprise tiers) never blocks.
+  assert.equal(await mtuCeilingBlock(s, proj, "live", "u-new:chat:2026-06", Infinity, JUNE), null);
+});
+
+test("mtuCeilingBlock: under the ceiling, even a new user passes (fills the last slot)", async () => {
+  const s = makeStore({});
+  const proj = "proj_room";
+  await meter(s, proj, "live", "u0:chat:2026-06", JUNE);
+  await meter(s, proj, "live", "u1:chat:2026-06", JUNE); // size 2 < ceiling 3 => room for one more
+  assert.equal(await mtuCeilingBlock(s, proj, "live", "u2:chat:2026-06", 3, JUNE), null, "the 3rd user still fits");
+});
+
+test("mtuCeilingBlock: a store error propagates (caller fails OPEN, never blocks on doubt)", async () => {
+  // The block is a positive signal from a HEALTHY counter; an unreachable store must not
+  // synthesize one. mtuCeilingBlock throws; core.ts's safeBlock swallows it => no block.
+  const broken = { setSize: async () => { throw new Error("counter down"); } } as unknown as Store;
+  await assert.rejects(() => mtuCeilingBlock(broken, "p", "live", "u:f:2026-06", 3, JUNE));
 });
 
 test("rateLimited: trips once the per-minute count exceeds the cap", async () => {

@@ -110,6 +110,40 @@ test("hosted over-limit signal surfaces on check, distinct from a fail-open tran
   assert.equal((await down.check("u1", "chat-message")).overLimit, false);
 });
 
+test("hosted blocked reason surfaces on check; a fail-open transient leaves it undefined", async () => {
+  // A healthy counter that REFUSED the op (new user past the Free ceiling).
+  const blockedCounter: CounterClient = {
+    async read() { return { used: 0, blocked: "bismite_free_limit" as const }; },
+    async increment() {},
+  };
+  const billing = new Billing({
+    plans, counter: blockedCounter, resolvePlan: () => "free", upgradeUrl: () => "/upgrade",
+  });
+  const c = await billing.check("u1", "chat-message");
+  assert.equal(c.blocked, "bismite_free_limit", "the confirmed hard block is surfaced to the dev");
+  // blocked is orthogonal to the dev's own end-user rule: under their own limit => allowed.
+  assert.equal(c.allowed, true);
+
+  // A transient meter outage is NOT a block (positive signal only).
+  const down = new Billing({ plans, counter: downCounter, resolvePlan: () => "free" });
+  assert.equal((await down.check("u1", "chat-message")).blocked, undefined);
+});
+
+test("record surfaces a hosted blocked reason; fail-open / non-hosted backends return {}", async () => {
+  const blockedCounter: CounterClient = {
+    async read() { return 0; },
+    async increment() { return { blocked: "bismite_free_limit" as const }; },
+  };
+  const billing = new Billing({ plans, counter: blockedCounter, resolvePlan: () => "free" });
+  assert.equal((await billing.record("u1", "chat-message", { count: 1 })).blocked, "bismite_free_limit");
+
+  // A void-returning backend (memCounter) and a fail-open transient both leave it undefined.
+  const ok = new Billing({ plans, counter: memCounter(), resolvePlan: () => "free" });
+  assert.equal((await ok.record("u1", "chat-message", { count: 1 })).blocked, undefined);
+  const down = new Billing({ plans, counter: downCounter, resolvePlan: () => "free" });
+  assert.equal((await down.record("u1", "chat-message", { count: 1 })).blocked, undefined);
+});
+
 test("usage is bucketed per period (day vs month)", () => {
   const d = new Date("2026-06-22T10:00:00Z");
   assert.equal(periodKey("day", d), "2026-06-22");

@@ -4,11 +4,23 @@
 // meter fails OPEN (a reachable-but-down counter never blocks a user).
 
 export type Usage = { tokens?: number; count?: number };
+// A HARD block from Bismite itself (PRD v2/B), distinct from `overLimit` (advisory) and
+// from the dev's own `allowed:false` (their end-user's plan rule). The counter REFUSED
+// the op: a new user past the Free ceiling, past the test cap, or calls over the tier
+// ceiling. Only ever set on a confirmed response from a healthy counter — a fail-open
+// transient leaves it undefined (the block is a positive signal, never the absence of one).
+export type BlockedReason = "bismite_free_limit" | "bismite_test_limit" | "bismite_calls_ceiling";
 // overLimit: the hosted counter signals the PROJECT is over its Bismite tier (MTU)
 // allowance — orthogonal to `allowed` (the dev's own plan rule for THIS user). It's
 // advisory: we never block on it (fail-open holds), the app just shows "upgrade your
 // Bismite plan". false on a fail-open transient, so it's distinct from a meter outage.
-export type CheckResult = { allowed: boolean; remaining: number; upgradeUrl: string | null; overLimit: boolean };
+export type CheckResult = {
+  allowed: boolean;
+  remaining: number;
+  upgradeUrl: string | null;
+  overLimit: boolean;
+  blocked?: BlockedReason;
+};
 export type Period = "day" | "month";
 // What the limit counts. "count" (default) = one per call — N requests/day.
 // "tokens" = sum of token usage — the AI wedge, where each call costs a variable
@@ -27,9 +39,12 @@ export type Plan = { features: Record<string, FeatureRule> };
  *  issue #4 can swap in a concurrency-correct store without touching the runtime. */
 export interface CounterClient {
   // A bare number is the used count. The hosted counter returns the count plus an
-  // `overLimit` tier flag; other backends just return the number (overLimit => false).
-  read(key: string): Promise<number | { used: number; overLimit?: boolean }>;
-  increment(key: string, amount: number): Promise<void>;
+  // `overLimit` tier flag and an optional `blocked` reason; other backends just return
+  // the number (overLimit => false, blocked => undefined).
+  read(key: string): Promise<number | { used: number; overLimit?: boolean; blocked?: BlockedReason }>;
+  // The hosted counter may report a hard `blocked` reason (it refused to count the op);
+  // other backends return void. Void/undefined => not blocked.
+  increment(key: string, amount: number): Promise<void | { blocked?: BlockedReason }>;
 }
 
 export type BillingConfig = {
@@ -69,6 +84,7 @@ export class Billing {
     }
     let used: number;
     let overLimit = false;
+    let blocked: BlockedReason | undefined;
     try {
       const r = await this.#config.counter.read(`${userId}:${feature}:${periodKey(rule.period)}`);
       if (typeof r === "number") {
@@ -76,6 +92,7 @@ export class Billing {
       } else {
         used = r.used;
         overLimit = !!r.overLimit;
+        blocked = r.blocked; // confirmed hard block from a healthy counter
       }
     } catch {
       if (rule.failClosed) {
@@ -93,23 +110,28 @@ export class Billing {
       remaining,
       upgradeUrl: allowed ? null : (this.#config.upgradeUrl?.(userId, feature) ?? null),
       overLimit,
+      blocked,
     };
   }
 
-  /** Meter usage AFTER the work (token count is only known post-call). Never throws. */
-  async record(userId: string, feature: string, usage: Usage = {}): Promise<void> {
+  /** Meter usage AFTER the work (token count is only known post-call). Never throws.
+   *  Returns `{ blocked }` when the hosted counter refused the op (a confirmed hard
+   *  block), mirroring check(); `{}` on the fail-open path or when nothing was metered. */
+  async record(userId: string, feature: string, usage: Usage = {}): Promise<{ blocked?: BlockedReason }> {
     const rule = await this.ruleFor(userId, feature);
-    if (rule === undefined || rule === "unlimited") return;
+    if (rule === undefined || rule === "unlimited") return {};
     // Meter in the rule's unit: token features count actual tokens (known only
     // after the call returns), everything else counts one per call. A token
     // feature recorded without { tokens } — or any non-positive amount — meters
     // nothing rather than wasting a counter round-trip.
     const amount = rule.unit === "tokens" ? (usage.tokens ?? 0) : (usage.count ?? 1);
-    if (amount <= 0) return;
+    if (amount <= 0) return {};
     try {
-      await this.#config.counter.increment(`${userId}:${feature}:${periodKey(rule.period)}`, amount);
+      const r = await this.#config.counter.increment(`${userId}:${feature}:${periodKey(rule.period)}`, amount);
+      return { blocked: r?.blocked };
     } catch {
-      // FAIL-OPEN: a failed record must never break the caller.
+      // FAIL-OPEN: a failed record must never break the caller (blocked stays undefined).
+      return {};
     }
   }
 }

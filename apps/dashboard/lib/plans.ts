@@ -7,14 +7,15 @@ export type PlanId = "free" | "pro" | "enterprise";
 export interface Plan {
   id: PlanId;
   name: string;
-  mtu: number; // Infinity = uncapped (renders as ∞)
-  calls: number;
+  mtuIncluded: number; // Infinity = uncapped (renders as ∞)
+  mtuOveragePer1k?: number; // €/1,000 MTU over included; paid tiers only
+  callsCeiling: number;
 }
 
 export const PLANS: Record<PlanId, Plan> = {
-  free: { id: "free", name: "Free", mtu: 1_000, calls: 100_000 },
-  pro: { id: "pro", name: "Pro", mtu: 100_000, calls: 5_000_000 },
-  enterprise: { id: "enterprise", name: "Enterprise", mtu: Infinity, calls: Infinity },
+  free: { id: "free", name: "Free", mtuIncluded: 1_000, callsCeiling: 100_000 },
+  pro: { id: "pro", name: "Pro", mtuIncluded: 10_000, mtuOveragePer1k: 8, callsCeiling: 5_000_000 },
+  enterprise: { id: "enterprise", name: "Enterprise", mtuIncluded: Infinity, callsCeiling: Infinity },
 };
 
 export const PLAN_IDS = Object.keys(PLANS) as PlanId[];

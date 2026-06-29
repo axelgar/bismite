@@ -1,4 +1,4 @@
-import type { CounterClient } from "./index.js";
+import type { BlockedReason, CounterClient } from "./index.js";
 
 /** Hosted Bismite counter — the managed runtime (PRD-hosted-platform §5). Same
  *  wire shape as ./http-counter, plus an `Authorization: Bearer <api key>` header
@@ -14,10 +14,11 @@ export function bismiteCounter(apiKey: string, baseUrl = "https://api.bismite.de
     async read(key) {
       const r = await fetch(`${baseUrl}/v1/usage?key=${encodeURIComponent(key)}`, { headers: auth });
       if (!r.ok) throw new Error(`bismite counter read ${r.status}`);
-      // Carries the project's tier over-limit flag back to check() (PRD §8), alongside
-      // the count. A non-ok is still a throw => fail-open, distinct from over-limit.
-      const data = (await r.json()) as { used?: number; overLimit?: boolean };
-      return { used: data.used ?? 0, overLimit: !!data.overLimit };
+      // Carries the project's tier over-limit flag and any hard `blocked` reason back to
+      // check() (PRD §8, v2/B), alongside the count. A non-ok is still a throw =>
+      // fail-open, distinct from over-limit and from a confirmed block.
+      const data = (await r.json()) as { used?: number; overLimit?: boolean; blocked?: BlockedReason };
+      return { used: data.used ?? 0, overLimit: !!data.overLimit, blocked: data.blocked };
     },
     async increment(key, amount) {
       const r = await fetch(`${baseUrl}/v1/usage/increment`, {
@@ -26,6 +27,10 @@ export function bismiteCounter(apiKey: string, baseUrl = "https://api.bismite.de
         body: JSON.stringify({ key, amount }),
       });
       if (!r.ok) throw new Error(`bismite counter increment ${r.status}`);
+      // A refused op still returns 200 with `blocked` (a non-200 is a throw => fail-open),
+      // so record() can surface the confirmed hard block to the dev.
+      const data = (await r.json()) as { blocked?: BlockedReason };
+      return { blocked: data.blocked };
     },
   };
 }
