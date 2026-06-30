@@ -1,7 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeStore } from "../src/core.js";
-import { extractUser, period, meter, summary, rateLimited, mtuCeilingBlock } from "../src/metering.js";
+import {
+  extractUser,
+  period,
+  meter,
+  summary,
+  rateLimited,
+  mtuCeilingBlock,
+  callsCeilingBlock,
+  testCapBlock,
+  TEST_MTU_CAP,
+} from "../src/metering.js";
 import type { Store } from "../src/core.js";
 
 const JUNE = new Date("2026-06-15T12:00:00Z");
@@ -85,6 +95,41 @@ test("mtuCeilingBlock: a store error propagates (caller fails OPEN, never blocks
   // synthesize one. mtuCeilingBlock throws; core.ts's safeBlock swallows it => no block.
   const broken = { setSize: async () => { throw new Error("counter down"); } } as unknown as Store;
   await assert.rejects(() => mtuCeilingBlock(broken, "p", "live", "u:f:2026-06", 3, JUNE));
+});
+
+test("callsCeilingBlock: blocks once the period's calls reach the ceiling; live-only; ∞ never blocks", async () => {
+  const s = makeStore({});
+  const proj = "proj_calls";
+  const ceiling = 3;
+  await meter(s, proj, "live", "a:chat:2026-06", JUNE); // calls=1 (same user: MTU stays 1, calls count every op)
+  await meter(s, proj, "live", "a:chat:2026-06", JUNE); // calls=2
+  assert.equal(await callsCeilingBlock(s, proj, "live", ceiling, JUNE), null, "under the ceiling: pass");
+  await meter(s, proj, "live", "a:chat:2026-06", JUNE); // calls=3 == ceiling
+  assert.equal(
+    await callsCeilingBlock(s, proj, "live", ceiling, JUNE),
+    "bismite_calls_ceiling",
+    "at the ceiling: the next call is refused",
+  );
+  // Test mode isn't calls-metered, so it's never calls-blocked here; Enterprise (∞) never blocks.
+  assert.equal(await callsCeilingBlock(s, proj, "test", ceiling, JUNE), null);
+  assert.equal(await callsCeilingBlock(s, proj, "live", Infinity, JUNE), null);
+});
+
+test("testCapBlock: flat-100 cap on distinct test users; never bills; live unaffected", async () => {
+  const s = makeStore({});
+  const proj = "proj_test";
+  for (let i = 0; i < TEST_MTU_CAP; i++) await meter(s, proj, "test", `u${i}:chat:2026-06`, JUNE); // fill to the cap
+
+  assert.equal(await testCapBlock(s, proj, "test", "u1:chat:2026-06", JUNE), null, "existing test user passes");
+  assert.equal(
+    await testCapBlock(s, proj, "test", "u-new:chat:2026-06", JUNE),
+    "bismite_test_limit",
+    "the 101st new test user is refused",
+  );
+  // Live mode is never test-capped here (it has its own ceilings).
+  assert.equal(await testCapBlock(s, proj, "live", "u-new:chat:2026-06", JUNE), null);
+  // Test traffic populated only the separate test set — the billing meters never moved.
+  assert.deepEqual(await summary(s, proj, JUNE), { mtu: 0, calls: 0, period: "2026-06" });
 });
 
 test("rateLimited: trips once the per-minute count exceeds the cap", async () => {

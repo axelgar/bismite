@@ -31,6 +31,12 @@ export function extractUser(counterKey: string): string {
 
 const mtuKey = (proj: string, p: string) => `${proj}:mtu:${p}`;
 const callsKey = (proj: string, p: string) => `${proj}:calls:${p}`;
+// A SEPARATE distinct-user set for TEST keys — never feeds billing, just enforces the cap.
+const testMtuKey = (proj: string, p: string) => `${proj}:testmtu:${p}`;
+
+// Flat test-key allowance, every tier (PRD v2/B §3): 100 (not 1k) so it can't cannibalize
+// the live-key upgrade lever. Test usage is hard-capped here but never billed.
+export const TEST_MTU_CAP = 100;
 
 // Hard-block reasons Bismite itself returns (PRD v2/B). Mirrors the SDK's BlockedReason
 // (packages/sdk) — kept as a local copy, like the plans mirror, to avoid coupling the
@@ -60,6 +66,43 @@ export async function mtuCeilingBlock(
   return "bismite_free_limit"; // a new user past the ceiling (e.g. the 1,001st on Free)
 }
 
+/** Hard fair-use ceiling on billable calls (PRD v2/B §6): once this period's call count
+ *  reaches the tier's `ceiling`, hard-block every tier (Free 100k, Pro 5M, Ent ∞). This is
+ *  the per-PERIOD guardrail that protects the Redis margin and routes heavy users to sales —
+ *  distinct from the per-MINUTE rate limit (`rateLimited`, a 429 burst guard). Live-only
+ *  (test calls aren't metered). Returns the reason or null. Run BEFORE `meter()` so a
+ *  refused call isn't itself counted. A thrown store error bubbles up => caller fails open. */
+export async function callsCeilingBlock(
+  store: Store,
+  projectId: string,
+  mode: Mode,
+  ceiling: number,
+  now = new Date(),
+): Promise<BlockedReason | null> {
+  if (mode !== "live" || !isFinite(ceiling)) return null;
+  // >= so `ceiling` calls succeed and the next one is refused (mirrors the MTU off-by-one).
+  if ((await store.read(callsKey(projectId, period(now)))) >= ceiling) return "bismite_calls_ceiling";
+  return null;
+}
+
+/** Flat-100 cap on distinct TEST-key users (PRD v2/B §3) — same humane new-user rule as the
+ *  Free MTU ceiling, but over a SEPARATE set that never bills. Closes the "test keys are an
+ *  uncapped production bypass" hole. Test-mode only (live has its own ceilings). Returns the
+ *  reason or null; a thrown store error bubbles up => caller fails open. */
+export async function testCapBlock(
+  store: Store,
+  projectId: string,
+  mode: Mode,
+  counterKey: string,
+  now = new Date(),
+): Promise<BlockedReason | null> {
+  if (mode !== "test") return null;
+  const key = testMtuKey(projectId, period(now));
+  if ((await store.setSize(key)) < TEST_MTU_CAP) return null; // room for one more
+  if (await store.isMember(key, extractUser(counterKey))) return null; // already counted => pass
+  return "bismite_test_limit"; // a new test user past the cap (the 101st)
+}
+
 /** Feed the two billing meters for one live counter op (a check or a record), and
  *  return the running period totals so the caller can apply tier enforcement.
  *  Test mode is excluded so CI/build traffic never moves the bill (PRD §7) => null. */
@@ -70,7 +113,12 @@ export async function meter(
   counterKey: string,
   now = new Date(),
 ): Promise<{ mtu: number; calls: number } | null> {
-  if (mode !== "live") return null;
+  if (mode !== "live") {
+    // Test mode: count the distinct user in the SEPARATE test set (enforces the flat-100
+    // cap, #3) but touch NO billing meter — test traffic must never move the bill (PRD §7).
+    if (mode === "test") await store.addMember(testMtuKey(projectId, period(now)), extractUser(counterKey));
+    return null;
+  }
   const p = period(now);
   // Independent keys, so run concurrently — halves the metering round-trips on the
   // hot path. (Batching into one Upstash pipeline is the next step — see BACKLOG.md.)

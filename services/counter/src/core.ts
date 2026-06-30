@@ -4,7 +4,16 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ControlPlane, Mode } from "./db.js";
 import { PLANS, planFor, type PlanId } from "./plans.js";
-import { meter, summary, rateLimited, utcDay, mtuCeilingBlock, type BlockedReason } from "./metering.js";
+import {
+  meter,
+  summary,
+  rateLimited,
+  utcDay,
+  mtuCeilingBlock,
+  callsCeilingBlock,
+  testCapBlock,
+  type BlockedReason,
+} from "./metering.js";
 
 /** Tenant + mode namespace: a key from project A can never read/write project B's
  *  counts, and a project's `test` traffic is isolated from its `live` counts. */
@@ -221,7 +230,13 @@ export function createHandler(
       const mtuCeiling = plan.mtuOveragePer1k == null ? plan.mtuIncluded : Infinity;
       const safeBlock = async (key: string): Promise<BlockedReason | null> => {
         try {
-          return await mtuCeilingBlock(store, projectId, mode, key, mtuCeiling);
+          // Mode-gated ceilings; first hit wins, all fail OPEN via this try/catch. Live:
+          // calls guardrail (every tier) then the Free MTU cap. Test: the flat-100 cap.
+          return (
+            (await callsCeilingBlock(store, projectId, mode, plan.callsCeiling)) ??
+            (await mtuCeilingBlock(store, projectId, mode, key, mtuCeiling)) ??
+            (await testCapBlock(store, projectId, mode, key))
+          );
         } catch (e) {
           console.error("block check error:", e);
           return null; // FAIL-OPEN
