@@ -20,6 +20,12 @@ export function TopBar({ children }: { children?: React.ReactNode }) {
         >
           Team
         </Link>
+        <Link
+          href="/dashboard/account"
+          className="text-sm text-muted-foreground hover:text-foreground"
+        >
+          Account
+        </Link>
         <div className="ml-auto flex items-center gap-3">{children}</div>
       </div>
     </header>
