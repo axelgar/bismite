@@ -31,6 +31,10 @@ export function extractUser(counterKey: string): string {
 
 const mtuKey = (proj: string, p: string) => `${proj}:mtu:${p}`;
 const callsKey = (proj: string, p: string) => `${proj}:calls:${p}`;
+// Org-level distinct-user set (v2/B): a user active across several of an org's projects
+// counts ONCE here, so this is the authoritative org MTU for overage billing + the org
+// dashboard. `org:` prefix keeps it clear of the proj_* keyspace.
+const orgMtuKey = (orgId: string, p: string) => `org:${orgId}:mtu:${p}`;
 // A SEPARATE distinct-user set for TEST keys — never feeds billing, just enforces the cap.
 const testMtuKey = (proj: string, p: string) => `${proj}:testmtu:${p}`;
 
@@ -112,6 +116,7 @@ export async function meter(
   mode: Mode,
   counterKey: string,
   now = new Date(),
+  orgId?: string,
 ): Promise<{ mtu: number; calls: number } | null> {
   if (mode !== "live") {
     // Test mode: count the distinct user in the SEPARATE test set (enforces the flat-100
@@ -120,11 +125,14 @@ export async function meter(
     return null;
   }
   const p = period(now);
-  // Independent keys, so run concurrently — halves the metering round-trips on the
-  // hot path. (Batching into one Upstash pipeline is the next step — see BACKLOG.md.)
+  const user = extractUser(counterKey);
+  // Independent keys, so run concurrently — halves the metering round-trips on the hot
+  // path. The org set (v2/B) dedupes the user across the org's projects = authoritative
+  // org MTU for overage billing. (Batching into one Upstash pipeline is the next step.)
   const [, calls] = await Promise.all([
-    store.addMember(mtuKey(projectId, p), extractUser(counterKey)), // MTU = distinct users
+    store.addMember(mtuKey(projectId, p), user), // per-project MTU = distinct users
     store.increment(callsKey(projectId, p), 1), // billable calls (guardrail meter)
+    orgId ? store.addMember(orgMtuKey(orgId, p), user) : Promise.resolve(), // org-level MTU
   ]);
   // ponytail: one extra SCARD for the live MTU count (SADD doesn't return cardinality).
   // Folds into the pipeline batch when that BACKLOG item lands.
@@ -132,7 +140,7 @@ export async function meter(
   return { mtu, calls };
 }
 
-/** Current-period billing numbers for a project (read path for the #4 dashboard). */
+/** Current-period billing numbers for a project (read path for the dashboard). */
 export async function summary(store: Store, projectId: string, now = new Date()) {
   const p = period(now);
   const [mtu, calls] = await Promise.all([
@@ -140,6 +148,34 @@ export async function summary(store: Store, projectId: string, now = new Date())
     store.read(callsKey(projectId, p)),
   ]);
   return { mtu, calls, period: p };
+}
+
+/** Authoritative org MTU this period — distinct users across ALL the org's projects (v2/B).
+ *  The basis for overage billing (max(0, mtu − included)) and the org usage view. */
+export async function orgSummary(store: Store, orgId: string, now = new Date()) {
+  const p = period(now);
+  return { mtu: await store.setSize(orgMtuKey(orgId, p)), period: p };
+}
+
+// How much overage we've already reported to Stripe this period — lets the daily reconcile
+// push only the DELTA toward the authoritative total, so a missed run self-heals next time
+// (the delta catches up) and a sum-aggregated Stripe Meter never double-counts.
+const overageReportedKey = (orgId: string, p: string) => `org:${orgId}:overage_reported:${p}`;
+
+/** Reconcile step: given the authoritative period overage (MTU above included), return the
+ *  amount NOT yet reported and bank it. Overage is monotonic within a period (distinct users
+ *  only grow), so the delta is always >= 0. Idempotent across same-total re-runs => 0. */
+export async function overageDelta(
+  store: Store,
+  orgId: string,
+  overage: number,
+  now = new Date(),
+): Promise<number> {
+  const key = overageReportedKey(orgId, period(now));
+  const reported = await store.read(key);
+  const delta = Math.max(0, Math.floor(overage) - reported);
+  if (delta > 0) await store.increment(key, delta);
+  return delta;
 }
 
 // Window slightly longer than 60s so the bucket survives until the next one starts.

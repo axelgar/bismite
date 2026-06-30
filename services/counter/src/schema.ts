@@ -3,6 +3,16 @@
 // relations machinery needed, Drizzle gives us typed queries + migration history.
 import { pgTable, text, timestamp, unique, integer, date, primaryKey } from "drizzle-orm/pg-core";
 
+// Billing tier is an ORG attribute (v2/B): one Pro subscription per org, so plan + the
+// Stripe customer live here, not on the project. A project resolves to its org's plan. Rows
+// are created on first project (default free) and upserted by the verified Stripe webhook.
+export const orgs = pgTable("orgs", {
+  id: text("id").primaryKey(), // better-auth organization id
+  plan: text("plan").notNull().default("free"),
+  stripeCustomerId: text("stripe_customer_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const projects = pgTable("projects", {
   id: text("id").primaryKey(), // proj_<hex>
   name: text("name").notNull().default(""),
@@ -10,12 +20,9 @@ export const projects = pgTable("projects", {
   // person. The counter only stores it for billing attribution — who-can-see-it authz is
   // enforced in the dashboard, which holds the better-auth session.
   orgId: text("org_id").notNull().default(""),
-  // Billing tier (PRD §8). Flipped by the Stripe webhook (#6) via setBilling; the
-  // /v1/projects/plan admin lever still works for seeds and negotiated Enterprise deals.
-  // Limits live in code (src/plans.ts), so this is just the tier id — easy to change.
+  // Deprecated (v2/B): plan + customer moved to `orgs` (per-org subscription). Kept to avoid
+  // a destructive migration on the pre-launch DB; no longer read. Drop in a later cleanup.
   plan: text("plan").notNull().default("free"),
-  // Stripe customer id (#6), set on first checkout. Lets the dashboard open the Customer
-  // Portal (card/cancel) for a returning paid user. Null until they buy something.
   stripeCustomerId: text("stripe_customer_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

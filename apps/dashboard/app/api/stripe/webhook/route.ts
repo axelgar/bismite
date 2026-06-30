@@ -28,27 +28,26 @@ export async function POST(req: Request) {
       case "checkout.session.completed": {
         const s = event.data.object as Stripe.Checkout.Session;
         const orgId = s.metadata?.orgId;
-        const projectId = s.metadata?.projectId ?? s.client_reference_id;
         const customer = typeof s.customer === "string" ? s.customer : s.customer?.id;
-        // Customer lands on the org (created lazily here on first checkout); plan on the project.
+        // Per-org subscription (v2/B): both the customer and the plan flip land on the ORG.
         if (orgId && customer) await setOrgCustomerId(orgId, customer);
-        if (projectId) await setBilling(projectId, "pro");
+        if (orgId) await setBilling(orgId, "pro");
         break;
       }
       // Cancel / lapse via the Customer Portal => back to Free. Keep the customer id so a
       // returning user resubscribes onto the same Stripe customer.
       case "customer.subscription.deleted": {
         const sub = event.data.object as Stripe.Subscription;
-        if (sub.metadata?.projectId) await setBilling(sub.metadata.projectId, "free");
+        if (sub.metadata?.orgId) await setBilling(sub.metadata.orgId, "free");
         break;
       }
       // Status changes (past_due -> canceled, reactivation, etc.): active/trialing => Pro,
       // anything else => Free. Idempotent, so redelivered events are safe.
       case "customer.subscription.updated": {
         const sub = event.data.object as Stripe.Subscription;
-        if (sub.metadata?.projectId) {
+        if (sub.metadata?.orgId) {
           const active = sub.status === "active" || sub.status === "trialing";
-          await setBilling(sub.metadata.projectId, active ? "pro" : "free");
+          await setBilling(sub.metadata.orgId, active ? "pro" : "free");
         }
         break;
       }

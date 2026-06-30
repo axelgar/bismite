@@ -2,7 +2,7 @@ import "server-only";
 // Org-level Stripe linkage (PRD-v2a #3). The Stripe customer belongs to the org, not the
 // project — so the org table (a better-auth table the dashboard owns) is the single home
 // for it. Read on checkout/portal; written by the verified webhook on first checkout.
-import { eq } from "drizzle-orm";
+import { eq, isNotNull } from "drizzle-orm";
 import { db } from "./db";
 import { organization } from "../auth-schema";
 
@@ -19,4 +19,15 @@ export async function getOrgCustomerId(orgId: string): Promise<string | null> {
  *  the webhook may redeliver, and the customer id never changes once set. */
 export async function setOrgCustomerId(orgId: string, customerId: string): Promise<void> {
   await db.update(organization).set({ stripeCustomerId: customerId }).where(eq(organization.id, orgId));
+}
+
+/** Every org that has ever subscribed (has a Stripe customer) — the overage reconcile's
+ *  work-list. Canceled orgs are harmless to include: with no metered price on an inactive
+ *  subscription, their meter events simply aren't invoiced. */
+export async function listOrgsWithCustomer(): Promise<Array<{ id: string; stripeCustomerId: string }>> {
+  const rows = await db
+    .select({ id: organization.id, stripeCustomerId: organization.stripeCustomerId })
+    .from(organization)
+    .where(isNotNull(organization.stripeCustomerId));
+  return rows.filter((r): r is { id: string; stripeCustomerId: string } => !!r.stripeCustomerId);
 }

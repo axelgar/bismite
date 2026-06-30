@@ -6,10 +6,12 @@ import {
   period,
   meter,
   summary,
+  orgSummary,
   rateLimited,
   mtuCeilingBlock,
   callsCeilingBlock,
   testCapBlock,
+  overageDelta,
   TEST_MTU_CAP,
 } from "../src/metering.js";
 import type { Store } from "../src/core.js";
@@ -130,6 +132,32 @@ test("testCapBlock: flat-100 cap on distinct test users; never bills; live unaff
   assert.equal(await testCapBlock(s, proj, "live", "u-new:chat:2026-06", JUNE), null);
   // Test traffic populated only the separate test set — the billing meters never moved.
   assert.deepEqual(await summary(s, proj, JUNE), { mtu: 0, calls: 0, period: "2026-06" });
+});
+
+test("org MTU: a user across the org's projects dedupes into one org set; orgSummary reads it", async () => {
+  const s = makeStore({});
+  const org = "org_x";
+  // u1 active in TWO of the org's projects => one org-MTU, but two per-project MTUs.
+  await meter(s, "proj_a", "live", "u1:chat:2026-06", JUNE, org);
+  await meter(s, "proj_b", "live", "u1:chat:2026-06", JUNE, org);
+  await meter(s, "proj_a", "live", "u2:chat:2026-06", JUNE, org);
+
+  assert.equal((await orgSummary(s, org, JUNE)).mtu, 2, "org dedupes u1 across projects (u1,u2)");
+  assert.equal((await summary(s, "proj_a", JUNE)).mtu, 2, "project a saw u1 + u2");
+  assert.equal((await summary(s, "proj_b", JUNE)).mtu, 1, "project b saw only u1");
+  // No orgId passed (existing callers) => no org set touched.
+  await meter(s, "proj_c", "live", "u9:chat:2026-06", JUNE);
+  assert.equal((await orgSummary(s, "org_none", JUNE)).mtu, 0);
+});
+
+test("overageDelta: reports only the unreported portion; idempotent; missed-run-safe", async () => {
+  const s = makeStore({});
+  const org = "org_ov";
+  assert.equal(await overageDelta(s, org, 0, JUNE), 0, "no overage => nothing to report");
+  assert.equal(await overageDelta(s, org, 2500, JUNE), 2500, "first report = the full overage");
+  assert.equal(await overageDelta(s, org, 2500, JUNE), 0, "same total again => nothing new (idempotent)");
+  assert.equal(await overageDelta(s, org, 4000, JUNE), 1500, "grew to 4000 => report the 1500 delta");
+  assert.equal(await overageDelta(s, org, 10000, JUNE), 6000, "a missed run is caught up to the total");
 });
 
 test("rateLimited: trips once the per-minute count exceeds the cap", async () => {

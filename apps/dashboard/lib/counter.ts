@@ -45,12 +45,24 @@ export function listProjects(orgId: string) {
   return call<ProjectView[]>(`/v1/projects?org=${encodeURIComponent(orgId)}`);
 }
 
-export function createProject(name: string, orgId: string) {
-  return call<{ projectId: string; test: string; live: string }>(`/v1/projects`, {
+/** Create a project. Returns secrets, or { error: "free_one_project" } when a Free org is
+ *  already at its 1-project limit (v2/B) — surfaced so the action can CTA-upgrade. */
+export async function createProject(
+  name: string,
+  orgId: string,
+): Promise<{ projectId: string; test: string; live: string } | { error: "free_one_project" }> {
+  const r = await fetch(`${BASE}/v1/projects`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { ...headers(), "content-type": "application/json" },
+    cache: "no-store",
     body: JSON.stringify({ name, org: orgId }),
   });
+  if (r.status === 403) {
+    const b = (await r.json().catch(() => ({}))) as { error?: string };
+    if (b.error === "free_one_project") return { error: "free_one_project" };
+  }
+  if (!r.ok) throw new Error(`counter POST /v1/projects -> ${r.status}`);
+  return (await r.json()) as { projectId: string; test: string; live: string };
 }
 
 export function regenerate(projectId: string, mode: Mode) {
@@ -61,26 +73,43 @@ export function regenerate(projectId: string, mode: Mode) {
   });
 }
 
-export function setPlan(projectId: string, plan: PlanId) {
-  return call<{ projectId: string; plan: PlanId }>(`/v1/projects/plan`, {
+/** Manual admin/seed lever — set an ORG's tier (v2/B: plan is per-org). */
+export function setPlan(orgId: string, plan: PlanId) {
+  return call<{ orgId: string; plan: PlanId }>(`/v1/projects/plan`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ projectId, plan }),
+    body: JSON.stringify({ orgId, plan }),
   });
 }
 
-/** Stripe-authoritative tier flip (#6) — called only from the verified webhook, which
- *  is the single writer of paid plans. `setPlan` stays the manual admin/seed lever. */
-export function setBilling(projectId: string, plan: PlanId, stripeCustomerId?: string) {
-  return call<{ projectId: string; plan: PlanId }>(`/v1/projects/billing`, {
+/** Stripe-authoritative tier flip (v2/B) — called only from the verified webhook, which is
+ *  the single writer of paid plans. Keyed off the ORG (per-org subscription). */
+export function setBilling(orgId: string, plan: PlanId, stripeCustomerId?: string) {
+  return call<{ orgId: string; plan: PlanId }>(`/v1/projects/billing`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ projectId, plan, stripeCustomerId }),
+    body: JSON.stringify({ orgId, plan, stripeCustomerId }),
   });
 }
 
 export function usageSummary(projectId: string) {
   return call<UsageSummary>(`/v1/usage/summary?projectId=${encodeURIComponent(projectId)}`);
+}
+
+/** Authoritative org MTU this period — distinct users across all the org's projects (v2/B).
+ *  Basis for the org usage view and the overage reconcile. */
+export function orgUsage(orgId: string) {
+  return call<{ mtu: number; period: string }>(`/v1/usage/org?orgId=${encodeURIComponent(orgId)}`);
+}
+
+/** Bank an org's authoritative period overage and get back only the not-yet-reported delta
+ *  to push to Stripe (idempotent + missed-run-safe). Used by the overage reconcile. */
+export function overageDelta(orgId: string, overage: number) {
+  return call<{ delta: number }>(`/v1/usage/org/overage`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ orgId, overage }),
+  });
 }
 
 /** Daily snapshot history (oldest first) for the trend charts (observability PRD-C). */

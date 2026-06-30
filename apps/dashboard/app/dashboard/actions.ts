@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { requireOrg, canManageKeys, canManageBilling } from "@/lib/session";
 import * as counter from "@/lib/counter";
 import { getOrgCustomerId } from "@/lib/org";
-import { stripe, billingEnabled, PRICE_PRO } from "@/lib/stripe";
+import { stripe, billingEnabled, PRICE_PRO, PRICE_MTU_OVERAGE } from "@/lib/stripe";
 
 const APP_URL = process.env.BETTER_AUTH_URL ?? "http://localhost:3001";
 
@@ -17,6 +17,10 @@ export async function createProjectAction(name: string) {
   const clean = name.trim();
   if (!clean) return { error: "Name is required" as const };
   const out = await counter.createProject(clean, orgId);
+  if ("error" in out) {
+    // Free = 1 project (v2/B): the counter refused a second project on a Free org.
+    return { error: "The Free plan is limited to one project — upgrade to Pro to add more." as const };
+  }
   revalidatePath("/dashboard");
   return { projectId: out.projectId, test: out.test, live: out.live };
 }
@@ -42,19 +46,24 @@ export async function checkoutAction(projectId: string) {
   const project = await counter.ownedProject(orgId, projectId);
   if (!project) return { error: "Not found" as const };
   if (!billingEnabled) return { error: "Billing is not configured" as const };
+  // Plan is per-org now (v2/B): one Pro subscription covers the whole org. Don't double-subscribe.
+  if (project.plan !== "free") return { error: "This org is already on a paid plan" as const };
 
-  // Customer = the org (#3): reuse the org's customer if it has one (any prior checkout on
-  // any of its projects), else let Stripe create one keyed to the signed-in email — the
-  // webhook then stores it on the org. orgId attributes the customer; projectId flips the
-  // enforced tier. Both ride the session and the subscription so every event maps cleanly.
+  // Customer = the org: reuse the org's customer if it has one, else let Stripe create one
+  // keyed to the signed-in email — the webhook then stores it on the org. The subscription is
+  // PER-ORG (v2/B): €19 base + the metered MTU-overage line (no quantity — usage-based). The
+  // overage line is added only when its price is configured, so a flat Pro tier still works.
   const customerId = await getOrgCustomerId(orgId);
+  const line_items = [
+    { price: PRICE_PRO, quantity: 1 },
+    ...(PRICE_MTU_OVERAGE ? [{ price: PRICE_MTU_OVERAGE }] : []),
+  ];
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
-    line_items: [{ price: PRICE_PRO, quantity: 1 }],
+    line_items,
     ...(customerId ? { customer: customerId } : { customer_email: user.email }),
-    client_reference_id: projectId,
-    metadata: { orgId, projectId },
-    subscription_data: { metadata: { orgId, projectId } },
+    metadata: { orgId }, // attribute the customer + plan flip to the ORG, not a project
+    subscription_data: { metadata: { orgId } },
     success_url: `${APP_URL}/dashboard/${projectId}?upgraded=1`,
     cancel_url: `${APP_URL}/dashboard/${projectId}`,
   });

@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { ChevronRight, FolderPlus, KeyRound } from "lucide-react";
 import { requireOrg, canManageKeys } from "@/lib/session";
-import { listProjects } from "@/lib/counter";
+import { listProjects, orgUsage } from "@/lib/counter";
+import { planFor } from "@/lib/plans";
 import { TopBar } from "@/components/top-bar";
 import { CreateProject } from "./create-project";
 import { SignOut } from "./sign-out";
@@ -11,12 +12,18 @@ export default async function Dashboard() {
   const canCreate = canManageKeys(role); // members use keys but don't create projects
   // Degrade gracefully: a counter outage/misconfig shows a banner, not a white-screen 500.
   let projects: Awaited<ReturnType<typeof listProjects>> = [];
+  let orgMtu = 0;
   let loadError = false;
   try {
-    projects = await listProjects(orgId);
+    const [projs, usage] = await Promise.all([listProjects(orgId), orgUsage(orgId)]);
+    projects = projs;
+    orgMtu = usage.mtu;
   } catch {
     loadError = true;
   }
+  // Plan is per-org (v2/B): every project shares it. Free orgs are capped at one project.
+  const plan = planFor(projects[0]?.plan);
+  const atFreeLimit = plan.id === "free" && projects.length >= 1;
 
   return (
     <>
@@ -32,8 +39,14 @@ export default async function Dashboard() {
             <p className="mt-1.5 text-sm text-muted-foreground">
               Each project gets its own test &amp; live API keys.
             </p>
+            {!loadError && (
+              <p className="mt-1 font-mono text-xs text-muted-foreground">
+                {plan.name} · {orgMtu.toLocaleString()} org MTU this period
+                {isFinite(plan.mtuIncluded) ? ` / ${plan.mtuIncluded.toLocaleString()} included` : ""}
+              </p>
+            )}
           </div>
-          {projects.length > 0 && canCreate && <CreateProject />}
+          {projects.length > 0 && canCreate && !atFreeLimit && <CreateProject />}
         </div>
 
         {loadError && (
@@ -83,6 +96,16 @@ export default async function Dashboard() {
               </Link>
             ))}
           </div>
+        )}
+
+        {atFreeLimit && canCreate && (
+          <p className="mt-4 text-[13px] text-muted-foreground">
+            The Free plan includes one project.{" "}
+            <Link href={`/dashboard/${projects[0].projectId}`} className="text-foreground-2 underline-offset-2 hover:underline">
+              Upgrade to Pro
+            </Link>{" "}
+            to add more.
+          </p>
         )}
       </main>
     </>

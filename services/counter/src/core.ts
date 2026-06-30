@@ -7,11 +7,13 @@ import { PLANS, planFor, type PlanId } from "./plans.js";
 import {
   meter,
   summary,
+  orgSummary,
   rateLimited,
   utcDay,
   mtuCeilingBlock,
   callsCeilingBlock,
   testCapBlock,
+  overageDelta,
   type BlockedReason,
 } from "./metering.js";
 
@@ -110,8 +112,16 @@ export function createHandler(
         const b = await body();
         if (!b.ok) return;
         const { name = "", org = "" } = b.data ?? {};
-        const out = await cp.createProject(String(name), String(org));
-        return json(200, out); // secrets revealed once, here only
+        try {
+          const out = await cp.createProject(String(name), String(org));
+          return json(200, out); // secrets revealed once, here only
+        } catch (e) {
+          // Free = 1 project (v2/B): surface a distinct 403 the dashboard can message + CTA.
+          if ((e as Error).message === "free_one_project") {
+            return json(403, { error: "free_one_project" });
+          }
+          throw e;
+        }
       }
 
       if (req.method === "POST" && path.endsWith("/v1/keys/regenerate")) {
@@ -125,35 +135,35 @@ export function createHandler(
         return json(200, { key: await cp.regenerate(projectId, mode) });
       }
 
-      // --- Admin: set a project's billing tier (settable manually for now; #6 = Stripe). ---
+      // --- Admin: set an ORG's billing tier (settable manually for seeds/Enterprise). ---
       if (req.method === "POST" && path.endsWith("/v1/projects/plan")) {
         if (!isAdmin) return json(401, { error: "admin only" });
         const b = await body();
         if (!b.ok) return;
-        const { projectId, plan } = b.data ?? {};
-        if (typeof projectId !== "string" || typeof plan !== "string" || !(plan in PLANS)) {
-          return json(400, { error: "projectId and plan (free|pro|enterprise) required" });
+        const { orgId, plan } = b.data ?? {};
+        if (typeof orgId !== "string" || typeof plan !== "string" || !(plan in PLANS)) {
+          return json(400, { error: "orgId and plan (free|pro|enterprise) required" });
         }
-        await cp.setPlan(projectId, plan as PlanId);
-        return json(200, { projectId, plan });
+        await cp.setPlan(orgId, plan as PlanId);
+        return json(200, { orgId, plan });
       }
 
-      // --- Admin: Stripe-authoritative tier flip (#6). Called by the dashboard's verified
-      // webhook: sets plan and (on first checkout) the stripe customer id together. ---
+      // --- Admin: Stripe-authoritative tier flip (v2/B). Called by the dashboard's verified
+      // webhook: sets the ORG's plan and (on first checkout) its stripe customer id. ---
       if (req.method === "POST" && path.endsWith("/v1/projects/billing")) {
         if (!isAdmin) return json(401, { error: "admin only" });
         const b = await body();
         if (!b.ok) return;
-        const { projectId, plan, stripeCustomerId } = b.data ?? {};
-        if (typeof projectId !== "string" || typeof plan !== "string" || !(plan in PLANS)) {
-          return json(400, { error: "projectId and plan (free|pro|enterprise) required" });
+        const { orgId, plan, stripeCustomerId } = b.data ?? {};
+        if (typeof orgId !== "string" || typeof plan !== "string" || !(plan in PLANS)) {
+          return json(400, { error: "orgId and plan (free|pro|enterprise) required" });
         }
         await cp.setBilling(
-          projectId,
+          orgId,
           plan as PlanId,
           typeof stripeCustomerId === "string" ? stripeCustomerId : undefined,
         );
-        return json(200, { projectId, plan });
+        return json(200, { orgId, plan });
       }
 
       // Dashboard read path: an org's projects (+ key metadata, no secrets). The dashboard
@@ -169,6 +179,27 @@ export function createHandler(
       if (req.method === "GET" && path.endsWith("/v1/usage/summary") && url.searchParams.has("projectId")) {
         if (!isAdmin) return json(401, { error: "admin only" });
         return json(200, await summary(store, url.searchParams.get("projectId")!));
+      }
+
+      // Dashboard + overage-reconcile read path: an ORG's authoritative MTU this period
+      // (distinct users across all its projects). The basis for overage billing (v2/B).
+      if (req.method === "GET" && path.endsWith("/v1/usage/org") && url.searchParams.has("orgId")) {
+        if (!isAdmin) return json(401, { error: "admin only" });
+        return json(200, await orgSummary(store, url.searchParams.get("orgId")!));
+      }
+
+      // Overage reconcile (v2/B): the dashboard sends an org's authoritative period overage;
+      // we bank it and return only the not-yet-reported DELTA, which the dashboard pushes to
+      // the Stripe Meter. Idempotent + missed-run-safe. Admin-guarded.
+      if (req.method === "POST" && path.endsWith("/v1/usage/org/overage")) {
+        if (!isAdmin) return json(401, { error: "admin only" });
+        const b = await body();
+        if (!b.ok) return;
+        const { orgId, overage } = b.data ?? {};
+        if (typeof orgId !== "string" || typeof overage !== "number" || !Number.isFinite(overage)) {
+          return json(400, { error: "orgId and numeric overage required" });
+        }
+        return json(200, { delta: await overageDelta(store, orgId, overage) });
       }
 
       // Dashboard read path: a project's daily snapshot history for trend charts
@@ -199,7 +230,7 @@ export function createHandler(
       const rawKey = bearer(req.headers.authorization);
       const resolved = rawKey ? await cp.resolveKey(rawKey) : null;
       if (!resolved) return json(401, { error: "invalid api key" });
-      const { projectId, mode } = resolved;
+      const { projectId, mode, orgId } = resolved;
       const plan = planFor(resolved.plan);
 
       // Billing meters (MTU + calls) for one counter op. Awaited but never allowed to
@@ -209,7 +240,7 @@ export function createHandler(
       // surface the tier over-limit signal.
       const recordUsage = async (key: string) => {
         try {
-          return await meter(store, projectId, mode, key);
+          return await meter(store, projectId, mode, key, new Date(), orgId);
         } catch (e) {
           console.error("meter error:", e);
           return null;
