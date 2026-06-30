@@ -13,6 +13,7 @@ const handler = createHandler(
   makeStore(process.env),
   process.env.ADMIN_TOKEN,
   Number(process.env.RATE_LIMIT_PER_MIN ?? 6000), // per-project/min; 0 disables
+  process.env.CRON_SECRET,
 );
 
 const port = Number(process.env.PORT ?? 4000);

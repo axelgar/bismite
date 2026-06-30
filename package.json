@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --import tsx --test packages/sdk/test/*.test.ts services/counter/test/*.test.ts examples/nextjs-chat/test/*.test.ts",
+    "test": "node --import tsx --test packages/sdk/test/*.test.ts services/counter/test/*.test.ts examples/nextjs-chat/test/*.test.ts apps/dashboard/test/*.test.ts",
     "smoke": "node scripts/smoke.ts",
     "build": "pnpm --filter bismite build",
     "counter": "tsx services/counter/src/index.ts",

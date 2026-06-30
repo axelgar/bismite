@@ -1,10 +1,11 @@
 import type { Config } from "drizzle-kit";
 
-// Just the better-auth tables — the counter owns + migrates projects/api_keys separately.
-// Used only by `pnpm db:generate` to emit the CREATE SQL; `pnpm db:setup` then applies it
-// additively. Do NOT `drizzle-kit push` here — it'd see the counter's tables as foreign.
+// The better-auth tables (auth-schema) + our app-owned tables (app-schema). The counter
+// owns + migrates projects/api_keys separately. Used only by `pnpm db:generate` to emit the
+// CREATE SQL; `pnpm db:setup` then applies it additively. Do NOT `drizzle-kit push` here —
+// it'd see the counter's tables as foreign.
 export default {
-  schema: "./auth-schema.ts",
+  schema: ["./auth-schema.ts", "./app-schema.ts"],
   dialect: "postgresql",
   dbCredentials: { url: process.env.DATABASE_URL! },
 } satisfies Config;
