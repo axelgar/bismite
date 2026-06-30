@@ -34,7 +34,7 @@ counter: bismiteCounter(process.env.BISMITE_API_KEY!)   // no Redis to provision
 | `services/counter` | The hosted usage-counter service (deployed at `api.bismite.dev`) |
 | `apps/dashboard` | The hosted dashboard (`app.bismite.dev`) — signup, projects, keys, usage, billing |
 | `examples/nextjs-chat` | Runnable Next.js chat app — the gate → meter → upgrade loop end to end |
-| `examples/nextjs-chat/public/landing.html` | Marketing landing page (served at `/landing.html`); the waitlist form posts to `/api/waitlist` → Upstash |
+| `examples/nextjs-chat/public/landing.html` | Marketing landing page (served at `/landing.html`) — hero, per-framework integration tabs, pricing |
 | `PRD.md`, `issues/` | Product doc and the build issues |
 
 ## Hacking on the monorepo

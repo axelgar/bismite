@@ -18,6 +18,103 @@ interface KeyView {
   lastUsedAt: string | null;
 }
 
+// ponytail: tiny regex tokenizer for these authored snippets — no highlighter dep
+// (the two static snippets below stay hand-colored; this covers the longer examples).
+const HL =
+  /(\/\/[^\n]*)|(`(?:[^`\\]|\\.)*`|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|\b(import|from|export|const|let|await|async|function|return|if|else|new|type|default)\b|\b(\d[\d_]*)\b/g;
+const HL_VAR = { c: "--color-comment", s: "--color-str", k: "--color-kw", m: "--color-num" } as const;
+function highlight(code: string) {
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  let out = "";
+  let last = 0;
+  let m: RegExpExecArray | null;
+  HL.lastIndex = 0;
+  while ((m = HL.exec(code))) {
+    out += esc(code.slice(last, m.index));
+    const cls = m[1] ? "c" : m[2] ? "s" : m[3] ? "k" : "m";
+    out += `<span style="color:var(${HL_VAR[cls]})">${esc(m[0])}</span>`;
+    last = HL.lastIndex;
+  }
+  return out + esc(code.slice(last));
+}
+
+function Snippet({ filename, code }: { filename: string; code: string }) {
+  return (
+    <CodeBlock filename={filename} copy={code}>
+      <span dangerouslySetInnerHTML={{ __html: highlight(code) }} />
+    </CodeBlock>
+  );
+}
+
+// In-app quickstart examples — mirror QUICKSTART.md (gate → expensive call → meter).
+const FRAMEWORKS = {
+  app: {
+    label: "App Router",
+    filename: "app/api/chat/route.ts",
+    code: `import { bismite } from "@/bismite.config";
+
+export async function POST(req: Request) {
+  const { userId, message } = await req.json();
+
+  // GATE — before the expensive call
+  const access = await bismite.check(userId, "chat-message");
+  if (!access.allowed)
+    return Response.json({ upgradeUrl: access.upgradeUrl }, { status: 402 });
+
+  const reply = await callYourLLM(message);
+
+  // METER — after (you only know the cost once it returns)
+  await bismite.record(userId, "chat-message", { count: 1 });
+  return Response.json({ reply });
+}`,
+  },
+  pages: {
+    label: "Pages Router",
+    filename: "pages/api/chat.ts",
+    code: `import type { NextApiRequest, NextApiResponse } from "next";
+import { bismite } from "@/bismite.config";
+
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  const { userId, message } = req.body;
+
+  const access = await bismite.check(userId, "chat-message");   // gate
+  if (!access.allowed)
+    return res.status(402).json({ upgradeUrl: access.upgradeUrl });
+
+  const reply = await callYourLLM(message);
+
+  await bismite.record(userId, "chat-message", { count: 1 });   // meter
+  res.json({ reply });
+}`,
+  },
+  ai: {
+    label: "Vercel AI SDK",
+    filename: "app/api/chat/route.ts",
+    code: `import { streamText } from "ai";
+import { bismite } from "@/bismite.config";
+
+export async function POST(req: Request) {
+  const { userId, messages } = await req.json();
+
+  // GATE on tokens-so-far — you don't know this call's cost yet
+  const access = await bismite.check(userId, "chat-message");
+  if (!access.allowed)
+    return Response.json({ upgradeUrl: access.upgradeUrl }, { status: 402 });
+
+  const result = streamText({
+    model: "openai/gpt-4o-mini",
+    messages,
+    // METER the real token usage once the stream finishes
+    onFinish: ({ usage }) =>
+      bismite.record(userId, "chat-message", { tokens: usage.totalTokens }),
+  });
+
+  return result.toUIMessageStreamResponse();
+}`,
+  },
+} as const;
+type Framework = keyof typeof FRAMEWORKS;
+
 export function ProjectTabs({
   projectId,
   period,
@@ -52,6 +149,7 @@ export function ProjectTabs({
   upgraded: boolean;
 }) {
   const [mode, setMode] = useState<Mode>("live");
+  const [fw, setFw] = useState<Framework>("app");
 
   // Returned from Stripe Checkout success.
   useEffect(() => {
@@ -222,6 +320,27 @@ export function ProjectTabs({
             <span className="text-[var(--color-kw)]">process</span>.env.
             <span className="text-[var(--color-ident)]">BISMITE_API_KEY</span>!)
           </CodeBlock>
+        </div>
+
+        <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-[15px] font-semibold">Use it in your app</h3>
+            <p className="mt-1 text-[13px] text-muted-foreground">
+              Gate before the expensive call, meter after. Same SDK in any stack.
+            </p>
+          </div>
+          <Segmented
+            value={fw}
+            onChange={setFw}
+            options={[
+              { value: "app", label: "App Router" },
+              { value: "pages", label: "Pages Router" },
+              { value: "ai", label: "AI SDK" },
+            ]}
+          />
+        </div>
+        <div className="mt-4">
+          <Snippet filename={FRAMEWORKS[fw].filename} code={FRAMEWORKS[fw].code} />
         </div>
       </TabsContent>
     </Tabs>

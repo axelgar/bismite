@@ -26,6 +26,14 @@ export function TopBar({ children }: { children?: React.ReactNode }) {
         >
           Account
         </Link>
+        <a
+          href="https://bismite.dev/docs.html"
+          target="_blank"
+          rel="noreferrer"
+          className="text-sm text-muted-foreground hover:text-foreground"
+        >
+          Docs
+        </a>
         <div className="ml-auto flex items-center gap-3">{children}</div>
       </div>
     </header>

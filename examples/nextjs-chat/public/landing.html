@@ -32,18 +32,19 @@
       --shadow-card:0 28px 64px -30px rgba(0,0,0,.75), inset 0 1px 0 rgba(255,255,255,.04);
     }
     * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
     body { margin:0; background:var(--bg); color:var(--text); font:16px/1.6 "Space Grotesk", system-ui, sans-serif; -webkit-font-smoothing:antialiased; }
     code, pre { font-family:"JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace; }
-    .wrap { position:relative; max-width: 760px; margin: 0 auto; padding: 80px 24px; overflow:hidden; }
+    .wrap { position:relative; max-width: 820px; margin: 0 auto; padding: 80px 24px; overflow:hidden; }
     .halo { position:absolute; top:-120px; left:50%; transform:translateX(-50%); width:900px; height:700px; background:var(--halo); pointer-events:none; z-index:0; }
-    .topnav, .tag, h1, .sub, pre, .props, h2, form, .foot { position:relative; z-index:1; }
+    .topnav, .tag, h1, .sub, pre, .props, h2, .foot, section { position:relative; z-index:1; }
 
     h1 { font-family:"Space Grotesk", sans-serif; font-weight:600; font-size: 42px; line-height:1.12; margin:0 0 16px; letter-spacing:-0.02em; }
     h1 .accent { background:var(--iridescent-110); -webkit-background-clip:text; background-clip:text; color:transparent; }
     .sub { font-size:16px; color:var(--muted); margin:0 0 36px; max-width:560px; }
     .sub b { color:var(--text-2); font-weight:600; }
 
-    pre { position:relative; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-code); padding:38px 20px 20px; overflow:auto; font-size:13.5px; box-shadow:var(--shadow-card); }
+    pre { position:relative; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-code); padding:38px 20px 20px; overflow:auto; font-size:13.5px; box-shadow:var(--shadow-card); margin:0; }
     pre::before { content:""; position:absolute; top:0; left:0; right:0; height:2px; background:var(--iridescent); border-radius:var(--r-code) var(--r-code) 0 0; }
     pre .winbar { position:absolute; top:12px; left:16px; right:16px; display:flex; align-items:center; gap:7px; }
     pre .dot { width:10px; height:10px; border-radius:50%; background:var(--border); }
@@ -55,15 +56,40 @@
     .prop { background:var(--surface); border:1px solid var(--border); border-radius:var(--r-card); padding:18px 20px; box-shadow:var(--shadow-card); color:var(--muted); }
     .prop b { color:var(--text); font-weight:600; }
 
-    h2 { font-family:"Space Grotesk", sans-serif; font-weight:600; letter-spacing:-0.01em; }
-    form { display:flex; gap:10px; margin-top:16px; flex-wrap:wrap; }
-    input { flex:1; min-width:220px; padding:13px 16px; border-radius:var(--r-btn); border:1px solid var(--input-border); background:var(--surface-2); color:var(--text); font-size:15px; font-family:"JetBrains Mono", monospace; transition:border-color .18s ease, box-shadow .18s ease; }
-    input::placeholder { color:var(--faint); }
-    input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(155,124,255,.2); }
-    button { padding:13px 22px; border-radius:var(--r-btn); border:0; background:var(--accent); color:#0B0D12; font-weight:600; font-size:15px; font-family:"Space Grotesk", sans-serif; cursor:pointer; transition:background .18s ease, box-shadow .18s ease; }
-    button:hover { background:var(--accent-hover); box-shadow:0 0 0 3px rgba(155,124,255,.2); }
-    button:disabled { opacity:.6; cursor:default; box-shadow:none; }
-    .foot { color:var(--muted); font-size:13px; margin-top:14px; }
+    section { margin:72px 0; }
+    .eyebrow { font-size:12px; font-family:"JetBrains Mono", monospace; color:var(--accent-tint); letter-spacing:.04em; text-transform:uppercase; margin:0 0 10px; }
+    h2 { font-family:"Space Grotesk", sans-serif; font-weight:600; font-size:26px; letter-spacing:-0.01em; margin:0 0 8px; }
+    .lead { color:var(--muted); margin:0 0 24px; max-width:560px; }
+
+    /* framework tabs */
+    .tablist { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; }
+    .tab { padding:7px 14px; border-radius:var(--r-pill); border:1px solid var(--border); background:var(--surface); color:var(--muted); font:500 13px "Space Grotesk", sans-serif; cursor:pointer; transition:color .18s ease, border-color .18s ease, background .18s ease; }
+    .tab:hover { color:var(--text); }
+    .tab[aria-selected="true"] { color:var(--accent-tint); border-color:rgba(155,124,255,.4); background:rgba(155,124,255,.1); }
+    .panel[hidden] { display:none; }
+
+    /* pricing */
+    .tiers { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:16px; }
+    .tier { background:var(--surface); border:1px solid var(--border); border-radius:var(--r-card); padding:22px 20px; box-shadow:var(--shadow-card); display:flex; flex-direction:column; }
+    .tier.featured { border-color:rgba(155,124,255,.45); }
+    .tier .name { font-weight:600; font-size:15px; }
+    .tier .price { font-size:30px; font-weight:600; letter-spacing:-0.02em; margin:10px 0 2px; }
+    .tier .price small { font-size:14px; color:var(--muted); font-weight:400; }
+    .tier .meta { color:var(--muted); font-size:13px; min-height:20px; }
+    .tier ul { list-style:none; padding:0; margin:16px 0 0; display:grid; gap:9px; }
+    .tier li { color:var(--text-2); font-size:13.5px; padding-left:20px; position:relative; }
+    .tier li::before { content:"→"; position:absolute; left:0; color:var(--accent); }
+    .note { color:var(--faint); font-size:12.5px; margin-top:16px; }
+
+    /* CTAs */
+    .cta-row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+    .btn-primary, .btn-ghost { padding:13px 22px; border-radius:var(--r-btn); font:600 15px "Space Grotesk", sans-serif; text-decoration:none; display:inline-block; transition:background .18s ease, box-shadow .18s ease, border-color .18s ease, color .18s ease; }
+    .btn-primary { background:var(--accent); color:#0B0D12; }
+    .btn-primary:hover { background:var(--accent-hover); box-shadow:0 0 0 3px rgba(155,124,255,.2); }
+    .btn-ghost { border:1px solid var(--border); color:var(--text-2); }
+    .btn-ghost:hover { border-color:var(--accent); color:var(--text); }
+
+    .foot { color:var(--muted); font-size:13px; margin-top:40px; }
     .foot code { color:var(--accent-tint); }
     .tag { display:inline-block; font-size:12px; font-family:"JetBrains Mono", monospace; color:var(--accent-tint); background:rgba(155,124,255,.1); border:1px solid rgba(155,124,255,.28); border-radius:var(--r-pill); padding:4px 12px; margin-bottom:24px; }
 
@@ -77,7 +103,7 @@
     .topnav .links a.cta:hover { background:var(--accent-hover); color:#0B0D12; box-shadow:0 0 0 3px rgba(155,124,255,.2); }
 
     @media (prefers-reduced-motion: reduce) {
-      * { transition:none !important; animation:none !important; }
+      * { transition:none !important; animation:none !important; scroll-behavior:auto !important; }
     }
   </style>
 </head>
@@ -95,10 +121,12 @@
         Bismite
       </a>
       <div class="links">
+        <a href="#frameworks">Examples</a>
+        <a href="#pricing">Pricing</a>
         <a href="/docs.html">Docs</a>
         <a href="https://github.com/axelgar/bismite">GitHub</a>
         <a href="https://app.bismite.dev">Sign in</a>
-        <a class="cta" href="#waitlist">Request access</a>
+        <a class="cta" href="https://app.bismite.dev">Sign up</a>
       </div>
     </div>
     <span class="tag">npm i bismite</span>
@@ -118,37 +146,159 @@
       <div class="prop"><b>Monetize instantly.</b> Limit reached → the right paywall → Stripe Checkout → unlocked, with no deploy.</div>
     </div>
 
-    <h2>Get early access</h2>
-    <form id="waitlist">
-      <input id="email" type="email" name="email" placeholder="you@company.com" required />
-      <button type="submit">Request access</button>
-    </form>
-    <p class="foot" id="msg">For developers building AI apps. <code>npm install bismite</code></p>
+    <!-- Framework integration tabs — the same gate→meter pattern in any stack -->
+    <section id="frameworks" data-tabs>
+      <p class="eyebrow">Drop it into your stack</p>
+      <h2>Two calls around the expensive work.</h2>
+      <p class="lead">Same SDK, same <code>bismite.config</code> — framework-agnostic. Gate before, meter after.</p>
+      <div class="tablist" role="tablist">
+        <button class="tab" role="tab" aria-selected="true">Next.js App Router</button>
+        <button class="tab" role="tab" aria-selected="false">Pages Router</button>
+        <button class="tab" role="tab" aria-selected="false">Node / Express</button>
+      </div>
 
-    <script>
-      const form = document.getElementById("waitlist");
-      const msg = document.getElementById("msg");
-      const btn = form.querySelector("button");
-      form.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const email = document.getElementById("email").value.trim();
-        btn.disabled = true;
-        msg.textContent = "Submitting…";
-        try {
-          const res = await fetch("/api/waitlist", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ email }),
-          });
-          if (res.ok) { msg.textContent = "Thanks — you're on the list. ✓"; form.reset(); }
-          else { const d = await res.json().catch(() => ({})); msg.textContent = (d.error || "Something went wrong") + " — try again."; }
-        } catch {
-          msg.textContent = "Network error — try again.";
-        } finally {
-          btn.disabled = false;
-        }
-      });
-    </script>
+      <div class="panel" role="tabpanel">
+<pre><span class="winbar" aria-hidden="true"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">app/api/chat/route.ts</span></span><code data-hl>import { bismite } from "@/bismite.config";
+
+export async function POST(req: Request) {
+  const { userId, message } = await req.json();
+
+  // GATE — before the expensive call
+  const access = await bismite.check(userId, "chat-message");
+  if (!access.allowed)
+    return Response.json({ upgradeUrl: access.upgradeUrl }, { status: 402 });
+
+  const reply = await callYourLLM(message);
+
+  // METER — after (you only know the cost once it returns)
+  await bismite.record(userId, "chat-message", { count: 1 });
+  return Response.json({ reply });
+}</code></pre>
+      </div>
+
+      <div class="panel" role="tabpanel" hidden>
+<pre><span class="winbar" aria-hidden="true"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">pages/api/chat.ts</span></span><code data-hl>import type { NextApiRequest, NextApiResponse } from "next";
+import { bismite } from "@/bismite.config";
+
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  const { userId, message } = req.body;
+
+  const access = await bismite.check(userId, "chat-message");   // gate
+  if (!access.allowed)
+    return res.status(402).json({ upgradeUrl: access.upgradeUrl });
+
+  const reply = await callYourLLM(message);
+
+  await bismite.record(userId, "chat-message", { count: 1 });   // meter
+  res.json({ reply });
+}</code></pre>
+      </div>
+
+      <div class="panel" role="tabpanel" hidden>
+<pre><span class="winbar" aria-hidden="true"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="fname">server.ts</span></span><code data-hl>import express from "express";
+import { bismite } from "./bismite.config";
+
+const app = express();
+app.use(express.json());
+
+app.post("/chat", async (req, res) => {
+  const { userId, message } = req.body;
+
+  const access = await bismite.check(userId, "chat-message");   // gate
+  if (!access.allowed)
+    return res.status(402).json({ upgradeUrl: access.upgradeUrl });
+
+  const reply = await callYourLLM(message);
+
+  await bismite.record(userId, "chat-message", { count: 1 });   // meter
+  res.json({ reply });
+});</code></pre>
+      </div>
+    </section>
+
+    <!-- Pricing — source of truth: services/counter/src/plans.ts (PLANS). Update both together. -->
+    <section id="pricing">
+      <p class="eyebrow">Pricing</p>
+      <h2>Pay for tracked users, nothing else.</h2>
+      <p class="lead">MTU = Monthly Tracked Users — the only billed meter. Calls are a fair-use ceiling, never billed.</p>
+      <div class="tiers">
+        <div class="tier">
+          <div class="name">Free</div>
+          <div class="price">€0</div>
+          <div class="meta">1,000 MTU / month</div>
+          <ul>
+            <li>Test + live keys</li>
+            <li>Usage dashboard</li>
+            <li>Blocks past the limit</li>
+          </ul>
+        </div>
+        <div class="tier featured">
+          <div class="name">Pro</div>
+          <div class="price">€19<small> / mo</small></div>
+          <div class="meta">10,000 MTU included</div>
+          <ul>
+            <li>€8 per extra 1,000 MTU</li>
+            <li>Overage billed, never blocked</li>
+            <li>Higher call ceiling</li>
+          </ul>
+        </div>
+        <div class="tier">
+          <div class="name">Enterprise</div>
+          <div class="price">Custom</div>
+          <div class="meta">Unlimited MTU</div>
+          <ul>
+            <li>Custom limits & SLA</li>
+            <li>Volume pricing</li>
+            <li>Priority support</li>
+          </ul>
+        </div>
+      </div>
+      <p class="note">Test traffic is isolated and never counts toward billing.</p>
+    </section>
+
+    <section id="start">
+      <h2>Ship a paywall today.</h2>
+      <p class="lead">Create a project, copy your key, gate a feature in five minutes.</p>
+      <div class="cta-row">
+        <a class="btn-primary" href="https://app.bismite.dev">Sign up</a>
+        <a class="btn-ghost" href="/docs.html">Read the docs</a>
+      </div>
+    </section>
+
+    <p class="foot">For developers building AI apps. <code>npm install bismite</code></p>
   </div>
+
+  <script>
+    // Syntax highlight — tiny tokenizer (comments / strings / keywords / numbers), no dep.
+    // ponytail: regex tokenizer, fine for these authored snippets; reach for a real
+    // highlighter only if we ever render arbitrary user code.
+    function hl(code) {
+      const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const re = /(\/\/[^\n]*)|(`(?:[^`\\]|\\.)*`|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|\b(import|from|export|const|let|await|async|function|return|if|else|new|type|default)\b|\b(\d[\d_]*)\b/g;
+      let out = "", last = 0, m;
+      while ((m = re.exec(code))) {
+        out += esc(code.slice(last, m.index));
+        const cls = m[1] ? "c" : m[2] ? "s" : m[3] ? "k" : "m";
+        out += '<span class="' + cls + '">' + esc(m[0]) + "</span>";
+        last = re.lastIndex;
+      }
+      return out + esc(code.slice(last));
+    }
+    document.querySelectorAll("code[data-hl]").forEach((el) => {
+      el.innerHTML = hl(el.textContent.trim());
+    });
+
+    // Framework tabs
+    document.querySelectorAll("[data-tabs]").forEach((group) => {
+      const tabs = group.querySelectorAll(".tab");
+      const panels = group.querySelectorAll(".panel");
+      tabs.forEach((tab, i) =>
+        tab.addEventListener("click", () => {
+          tabs.forEach((t, j) => t.setAttribute("aria-selected", String(i === j)));
+          panels.forEach((p, j) => (p.hidden = i !== j));
+        }),
+      );
+    });
+  </script>
 </body>
 </html>

@@ -19,7 +19,7 @@ npm install bismite
 The meter needs an atomic, shared counter so the limit is correct across
 serverless instances. The hosted counter handles that for you:
 
-1. Sign up at **[app.bismite.dev](https://app.bismite.dev)** _(early access — invite-only)_.
+1. Sign up at **[app.bismite.dev](https://app.bismite.dev)**.
 2. **Create a project** → its `bsk_test_…` and `bsk_live_…` keys are revealed once.
 3. Copy the live key into your env:
 
