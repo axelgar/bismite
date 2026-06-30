@@ -2,8 +2,8 @@
 // makes before touching the counter — no session => bounce to /signin.
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { eq, and } from "drizzle-orm";
-import { auth } from "./auth";
+import { eq, and, asc } from "drizzle-orm";
+import { auth, ensurePersonalOrg } from "./auth";
 import { db } from "./db";
 import { member } from "../auth-schema";
 
@@ -32,9 +32,13 @@ export async function requireOrg() {
       .select({ orgId: member.organizationId })
       .from(member)
       .where(eq(member.userId, s.user.id))
+      .orderBy(asc(member.createdAt)) // deterministic: same org each time
       .limit(1);
     orgId = m?.orgId ?? null;
   }
+  // Self-heal: a user whose signup org-create failed has no membership — create their
+  // personal org now rather than bouncing them to /signin in a permanent loop.
+  if (!orgId) orgId = await ensurePersonalOrg(s.user).catch(() => null);
   if (!orgId) redirect("/signin");
   // The user's role in the active org — gates key/billing actions.
   const [mr] = await db

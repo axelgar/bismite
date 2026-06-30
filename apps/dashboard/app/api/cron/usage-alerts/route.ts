@@ -1,4 +1,4 @@
-import { listAllOrgs, orgAdminEmails } from "@/lib/org";
+import { listAllOrgIds, orgAdminEmails } from "@/lib/org";
 import { orgUsage } from "@/lib/counter";
 import { sendEmail, usageAlertEmail } from "@/lib/email";
 import { thresholdToAlert, lastAlertedThreshold, recordAlertThreshold } from "@/lib/alerts";
@@ -13,32 +13,32 @@ const APP_URL = process.env.BETTER_AUTH_URL ?? "http://localhost:3001";
 // first crossing of 80% / 100% this period, email the org's owners/admins an upgrade nudge.
 // De-duped via usage_alerts so each threshold sends at most once a period.
 //
-// Guarded by CRON_SECRET (Vercel cron sends it as a bearer). Wired to a daily Vercel cron.
+// Guarded by CRON_SECRET (Vercel cron sends it as a bearer). Fails CLOSED if the secret is
+// unset so an unconfigured deploy can't be publicly triggered. Wired to a daily Vercel cron.
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET;
-  if (secret && req.headers.get("authorization") !== `Bearer ${secret}`) {
+  if (!secret) return new Response("cron not configured", { status: 503 });
+  if (req.headers.get("authorization") !== `Bearer ${secret}`) {
     return new Response("unauthorized", { status: 401 });
   }
 
-  const orgs = await listAllOrgs();
+  const orgIds = await listAllOrgIds();
   let alerted = 0;
   let failed = 0;
 
-  for (const org of orgs) {
+  for (const orgId of orgIds) {
     try {
-      // ponytail: tier = ever-subscribed → Pro ceiling, else Free. Uses the dashboard's own
-      // org.stripeCustomerId, so no counter round-trip and no per-project-plan quirk. A
-      // canceled org keeps its id (alerts against Pro's 10k, under-nudges); read the
-      // counter's enforced plan here if that miss ever matters.
-      const ceiling = org.hasCustomer ? PLANS.pro.mtuIncluded : PLANS.free.mtuIncluded;
-      const planName = org.hasCustomer ? PLANS.pro.name : PLANS.free.name;
+      // Size the ceiling off the ENFORCED plan from the counter (not a Stripe-customer
+      // proxy) so a canceled org being hard-blocked at 1k is alerted against 1k, not 10k.
+      const { mtu, period, plan } = await orgUsage(orgId);
+      const ceiling = PLANS[plan].mtuIncluded;
+      const planName = PLANS[plan].name;
 
-      const { mtu, period } = await orgUsage(org.id);
-      const last = await lastAlertedThreshold(org.id, period);
+      const last = await lastAlertedThreshold(orgId, period);
       const threshold = thresholdToAlert(mtu, ceiling, last);
       if (threshold === 0) continue; // not over a new threshold => no email
 
-      const recipients = await orgAdminEmails(org.id);
+      const recipients = await orgAdminEmails(orgId);
       if (recipients.length === 0) continue; // nobody to tell
 
       const { subject, html } = usageAlertEmail({
@@ -49,15 +49,18 @@ export async function GET(req: Request) {
         upgradeUrl: `${APP_URL}/dashboard`,
       });
       await sendEmail(recipients, subject, html);
-      await recordAlertThreshold(org.id, period, threshold);
+      // ponytail: send then record — not atomic (neon-http has no transactions). A crash
+      // between them re-sends this threshold next run (at-least-once); the inverse order
+      // would LOSE alerts, so this is the safe side of the trade.
+      await recordAlertThreshold(orgId, period, threshold);
       alerted++;
     } catch (err) {
       // One org's failure must not abort the sweep; the next run retries it (and the
       // threshold isn't recorded, so no email is lost).
-      console.error(`usage-alert failed for org ${org.id}:`, err);
+      console.error(`usage-alert failed for org ${orgId}:`, err);
       failed++;
     }
   }
 
-  return Response.json({ orgs: orgs.length, alerted, failed });
+  return Response.json({ orgs: orgIds.length, alerted, failed });
 }

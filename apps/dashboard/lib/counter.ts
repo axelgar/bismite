@@ -99,7 +99,11 @@ export function usageSummary(projectId: string) {
 /** Authoritative org MTU this period — distinct users across all the org's projects (v2/B).
  *  Basis for the org usage view and the overage reconcile. */
 export function orgUsage(orgId: string) {
-  return call<{ mtu: number; period: string }>(`/v1/usage/org?orgId=${encodeURIComponent(orgId)}`);
+  // `plan` is the ENFORCED tier (from the counter) — the crons size limits off it, never a
+  // stale "has a Stripe customer" proxy.
+  return call<{ mtu: number; period: string; plan: PlanId }>(
+    `/v1/usage/org?orgId=${encodeURIComponent(orgId)}`,
+  );
 }
 
 /** Bank an org's authoritative period overage and get back only the not-yet-reported delta
@@ -109,6 +113,16 @@ export function overageDelta(orgId: string, overage: number) {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ orgId, overage }),
+  });
+}
+
+/** Roll back a banked overage delta when the Stripe push fails, so the next reconcile
+ *  re-derives and retries it instead of silently dropping the overage. */
+export function unbankOverage(orgId: string, delta: number) {
+  return call<{ ok: true }>(`/v1/usage/org/overage/unbank`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ orgId, delta }),
   });
 }
 

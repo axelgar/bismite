@@ -33,6 +33,10 @@ export interface ControlPlane {
   regenerate(projectId: string, mode: Mode): Promise<string>;
   /** Set an ORG's billing tier; the hot path picks it up on the next resolve. */
   setPlan(orgId: string, plan: PlanId): Promise<void>;
+  /** An org's ENFORCED billing tier (what the hot path actually caps on). The billing +
+   *  alert crons read this so they track the real plan, never a stale "has a Stripe
+   *  customer" proxy (a canceled org keeps its customer id but flips back to free). */
+  orgPlan(orgId: string): Promise<PlanId>;
   /** Stripe-authoritative tier flip (v2/B): set the ORG's plan and, when a checkout first
    *  creates one, the customer id. Called only by the dashboard's verified Stripe webhook. */
   setBilling(orgId: string, plan: PlanId, stripeCustomerId?: string): Promise<void>;
@@ -120,6 +124,10 @@ export function makeControlPlane(env: Record<string, string | undefined>): Contr
       // Ensure the org has a billing row (default free) so plan/customer have a home.
       await d.insert(orgs).values({ id: orgId, plan: "free" }).onConflictDoNothing();
       // Free = 1 project (v2/B): a Free org may hold a single project; upgrade for more.
+      // ponytail: read-then-insert TOCTOU — two concurrent createProject calls on one Free
+      // org could both pass and create 2 projects (neon-http has no transactions). Benign:
+      // self-inflicted single-org race, worst case a Free org gets a 2nd project. Add a
+      // partial unique index (one row per org where plan='free') if it ever matters.
       const [org] = await d.select({ plan: orgs.plan }).from(orgs).where(eq(orgs.id, orgId)).limit(1);
       if ((org?.plan ?? "free") === "free") {
         const existing = await d.select({ id: projects.id }).from(projects).where(eq(projects.orgId, orgId));
@@ -211,6 +219,12 @@ export function makeControlPlane(env: Record<string, string | undefined>): Contr
         createdAt: p.createdAt,
         keys: byProj.get(p.id) ?? [],
       }));
+    },
+
+    async orgPlan(orgId) {
+      const d = await db();
+      const [o] = await d.select({ plan: orgs.plan }).from(orgs).where(eq(orgs.id, orgId)).limit(1);
+      return (o?.plan ?? "free") as PlanId;
     },
 
     async listAllProjectIds() {

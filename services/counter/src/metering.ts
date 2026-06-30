@@ -178,6 +178,20 @@ export async function overageDelta(
   return delta;
 }
 
+/** Roll back a delta banked by `overageDelta` when the downstream Stripe push fails, so the
+ *  next reconcile re-derives and retries it instead of losing it forever. ponytail: a crash
+ *  in the narrow window between bank and this unbank under-reports that delta (safe — we
+ *  never over-charge), which is strictly better than the old "lost on every Stripe error". */
+export async function overageUnbank(
+  store: Store,
+  orgId: string,
+  delta: number,
+  now = new Date(),
+): Promise<void> {
+  if (delta <= 0) return;
+  await store.increment(overageReportedKey(orgId, period(now)), -delta);
+}
+
 // Window slightly longer than 60s so the bucket survives until the next one starts.
 const RL_TTL = 70;
 

@@ -21,9 +21,9 @@ export async function setOrgCustomerId(orgId: string, customerId: string): Promi
   await db.update(organization).set({ stripeCustomerId: customerId }).where(eq(organization.id, orgId));
 }
 
-/** Every org that has ever subscribed (has a Stripe customer) — the overage reconcile's
- *  work-list. Canceled orgs are harmless to include: with no metered price on an inactive
- *  subscription, their meter events simply aren't invoiced. */
+/** Every org that has a Stripe customer — the overage reconcile's work-list. Having a
+ *  customer id only means "could be billed"; the reconcile still gates on the ENFORCED plan
+ *  (from the counter) so a canceled org that kept its id isn't billed overage. */
 export async function listOrgsWithCustomer(): Promise<Array<{ id: string; stripeCustomerId: string }>> {
   const rows = await db
     .select({ id: organization.id, stripeCustomerId: organization.stripeCustomerId })
@@ -32,14 +32,11 @@ export async function listOrgsWithCustomer(): Promise<Array<{ id: string; stripe
   return rows.filter((r): r is { id: string; stripeCustomerId: string } => !!r.stripeCustomerId);
 }
 
-/** Every org — the threshold-alert cron's work-list (Free orgs included; they're the
- *  conversion lever). `hasCustomer` lets the cron treat ever-subscribed orgs as the Pro
- *  ceiling without a counter round-trip. */
-export async function listAllOrgs(): Promise<Array<{ id: string; hasCustomer: boolean }>> {
-  const rows = await db
-    .select({ id: organization.id, customerId: organization.stripeCustomerId })
-    .from(organization);
-  return rows.map((r) => ({ id: r.id, hasCustomer: !!r.customerId }));
+/** Every org id — the threshold-alert cron's work-list (all tiers; the enforced plan is
+ *  read per-org from the counter, never inferred from a Stripe-customer proxy). */
+export async function listAllOrgIds(): Promise<string[]> {
+  const rows = await db.select({ id: organization.id }).from(organization);
+  return rows.map((r) => r.id);
 }
 
 /** Owner/admin emails for an org — who threshold + billing alerts go to (PRD-v2a roles). */

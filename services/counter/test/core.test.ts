@@ -1,7 +1,28 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { nsKey, makeStore } from "../src/core.js";
+import { nsKey, makeStore, createHandler } from "../src/core.js";
 import { makeControlPlane } from "../src/db.js";
+
+// Minimal node req/res doubles so we can drive the real handler without booting a server.
+// Body is passed Vercel-style (pre-parsed string on req.body), which readJson accepts.
+function mockReq(method, path, { authorization, body } = {}) {
+  return { method, url: path, headers: { authorization }, body: body && JSON.stringify(body) };
+}
+function mockRes() {
+  return {
+    statusCode: 0,
+    _body: "",
+    writeHead(code) {
+      this.statusCode = code;
+    },
+    end(s) {
+      this._body = s ?? "";
+    },
+    get json() {
+      return JSON.parse(this._body || "{}");
+    },
+  };
+}
 
 // No DATABASE_URL => PGlite in-memory, exercising the real Drizzle schema + SQL.
 const cp = makeControlPlane({});
@@ -22,6 +43,32 @@ test("createProject mints resolvable test + live keys with the right prefixes", 
 
   // Unknown key => null (=> 401), and the scheme/value must match exactly.
   assert.equal(await cp.resolveKey("bsk_test_nope"), null);
+});
+
+test("FAIL-OPEN: a store error in the block check yields a normal 200, never `blocked`", async () => {
+  // The contract that actually protects users: a transient counter error during the
+  // ceiling check must let the request through (no `blocked`), not synthesize a block.
+  const { live } = await cp.createProject("failopen", "org-fo"); // Free org => finite ceilings run
+  const base = makeStore({}); // in-memory; writes (meter) succeed
+  const store = {
+    ...base,
+    // The block-check reads throw (simulating Redis down); the meter writes still work.
+    setSize: async () => {
+      throw new Error("redis down");
+    },
+    isMember: async () => {
+      throw new Error("redis down");
+    },
+    read: async () => {
+      throw new Error("redis down");
+    },
+  };
+  const handler = createHandler(cp, store, undefined, 0);
+  const res = mockRes();
+  await handler(mockReq("POST", "/v1/usage/increment", { authorization: `Bearer ${live}`, body: { key: "u-new", amount: 1 } }), res);
+
+  assert.equal(res.statusCode, 200); // not a 4xx, not a 500
+  assert.equal(res.json.blocked, undefined); // block check threw => failed OPEN, no block
 });
 
 test("plan is per-ORG: setPlan changes what every project in the org resolves to", async () => {

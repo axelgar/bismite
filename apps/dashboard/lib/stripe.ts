@@ -12,6 +12,8 @@ export const PRICE_PRO = process.env.STRIPE_PRICE_PRO; // €19/mo flat base —
 // Metered price for MTU overage (€8 / 1,000 MTU above included), linked to the Stripe Meter
 // below. Optional: unset => no overage line is added and the reconcile job no-ops, so a flat
 // Pro tier still works in dev. Create the meter + metered price in the Stripe console (test+live).
+// IMPORTANT: the reconcile reports raw MTU as the meter `value` (not thousands), so the
+// metered price MUST be set to €0.008 per unit for €8/1,000 to hold. Don't price it per-1k.
 export const PRICE_MTU_OVERAGE = process.env.STRIPE_PRICE_MTU_OVERAGE;
 // The Meter's event_name — what the reconcile job reports org MTU overage against.
 export const METER_EVENT_MTU_OVERAGE = process.env.STRIPE_METER_MTU_OVERAGE ?? "mtu_overage";

@@ -1,5 +1,5 @@
 import "server-only";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { db } from "./db";
 import { usageAlerts } from "../app-schema";
 
@@ -17,14 +17,15 @@ export async function lastAlertedThreshold(orgId: string, period: string): Promi
   return row?.threshold ?? 0;
 }
 
-/** Bank the threshold just emailed. Idempotent upsert on (org, period); only ever raises
- *  the recorded threshold, so a redelivered/again-run cron can't lower it. */
+/** Bank the threshold just emailed. Idempotent upsert on (org, period); GREATEST means it
+ *  can only ever RAISE the recorded threshold, so a redelivered/out-of-order cron can't
+ *  lower it and re-trigger a lower-band email. */
 export async function recordAlertThreshold(orgId: string, period: string, threshold: number): Promise<void> {
   await db
     .insert(usageAlerts)
     .values({ orgId, period, threshold })
     .onConflictDoUpdate({
       target: [usageAlerts.orgId, usageAlerts.period],
-      set: { threshold },
+      set: { threshold: sql`greatest(${usageAlerts.threshold}, ${threshold})` },
     });
 }

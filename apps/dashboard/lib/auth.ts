@@ -4,7 +4,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { organization } from "better-auth/plugins";
 import { APIError } from "better-auth/api";
 import { randomBytes } from "node:crypto";
-import { eq, and } from "drizzle-orm";
+import { eq, and, asc } from "drizzle-orm";
 import { db } from "./db";
 import { member, invitation } from "../auth-schema";
 import { sendEmail } from "./email";
@@ -50,6 +50,23 @@ function signupAllowed(email: string): boolean {
   const e = email.trim().toLowerCase();
   const domain = e.includes("@") ? "@" + e.split("@")[1] : "";
   return list.includes(e) || (domain !== "" && list.includes(domain));
+}
+
+/** Idempotently ensure a user has a personal org (org-of-one); returns its id. Called from
+ *  the signup hook AND as a self-heal in requireOrg, so a half-failed signup never leaves a
+ *  user permanently org-less and soft-locked out of the dashboard (v2/B review fix). */
+export async function ensurePersonalOrg(u: { id: string; name: string; email: string }): Promise<string | null> {
+  const [m] = await db
+    .select({ orgId: member.organizationId })
+    .from(member)
+    .where(eq(member.userId, u.id))
+    .orderBy(asc(member.createdAt)) // deterministic: oldest membership wins
+    .limit(1);
+  if (m) return m.orgId;
+  const org = await auth.api.createOrganization({
+    body: { name: `${u.name}’s Org`, slug: personalOrgSlug(u.email), userId: u.id },
+  });
+  return (org as { id?: string } | null)?.id ?? null;
 }
 
 export const auth = betterAuth({
@@ -108,12 +125,16 @@ export const auth = betterAuth({
           }
           return { data: user };
         },
-        // Auto-create a personal org so a solo dev is an org-of-one from signup — same
-        // code path as a real team. createOrganization adds the user as `owner` member.
+        // Auto-create a personal org so a solo dev is an org-of-one from signup — same code
+        // path as a real team. Failure-isolated: the user row has already committed, so a
+        // throw here would otherwise leave them org-less; instead we log and let requireOrg
+        // self-heal on their next request (never a permanent soft-lock).
         after: async (user) => {
-          await auth.api.createOrganization({
-            body: { name: `${user.name}’s Org`, slug: personalOrgSlug(user.email), userId: user.id },
-          });
+          try {
+            await ensurePersonalOrg(user);
+          } catch (e) {
+            console.error("personal org create on signup failed; will self-heal on next login:", e);
+          }
         },
       },
     },
@@ -126,6 +147,7 @@ export const auth = betterAuth({
             .select({ orgId: member.organizationId })
             .from(member)
             .where(eq(member.userId, session.userId))
+            .orderBy(asc(member.createdAt)) // deterministic landing org across logins
             .limit(1);
           return { data: { ...session, activeOrganizationId: m?.orgId ?? null } };
         },

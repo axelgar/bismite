@@ -14,6 +14,7 @@ import {
   callsCeilingBlock,
   testCapBlock,
   overageDelta,
+  overageUnbank,
   type BlockedReason,
 } from "./metering.js";
 
@@ -185,7 +186,11 @@ export function createHandler(
       // (distinct users across all its projects). The basis for overage billing (v2/B).
       if (req.method === "GET" && path.endsWith("/v1/usage/org") && url.searchParams.has("orgId")) {
         if (!isAdmin) return json(401, { error: "admin only" });
-        return json(200, await orgSummary(store, url.searchParams.get("orgId")!));
+        const orgId = url.searchParams.get("orgId")!;
+        // Include the ENFORCED plan so the billing + alert crons size limits off the real
+        // tier, never a stale "ever had a Stripe customer" proxy (v2/B review fix).
+        const [s, plan] = await Promise.all([orgSummary(store, orgId), cp.orgPlan(orgId)]);
+        return json(200, { ...s, plan });
       }
 
       // Overage reconcile (v2/B): the dashboard sends an org's authoritative period overage;
@@ -202,6 +207,21 @@ export function createHandler(
         return json(200, { delta: await overageDelta(store, orgId, overage) });
       }
 
+      // Overage rollback (v2/B review fix): if the dashboard's Stripe meter push fails after
+      // we banked a delta, it calls this to un-bank so the next reconcile retries instead of
+      // silently dropping the overage. Admin-guarded.
+      if (req.method === "POST" && path.endsWith("/v1/usage/org/overage/unbank")) {
+        if (!isAdmin) return json(401, { error: "admin only" });
+        const b = await body();
+        if (!b.ok) return;
+        const { orgId, delta } = b.data ?? {};
+        if (typeof orgId !== "string" || typeof delta !== "number" || !Number.isFinite(delta)) {
+          return json(400, { error: "orgId and numeric delta required" });
+        }
+        await overageUnbank(store, orgId, delta);
+        return json(200, { ok: true });
+      }
+
       // Dashboard read path: a project's daily snapshot history for trend charts
       // (observability PRD-C #5). Admin-guarded, by projectId — same shape as the
       // summary read above; the dashboard scopes to the owner before calling.
@@ -215,8 +235,12 @@ export function createHandler(
       // admin token OR Vercel's CRON_SECRET bearer. Idempotent per (project, day),
       // so an extra invocation just overwrites today's row.
       if (req.method === "GET" && path.endsWith("/v1/snapshots/run")) {
+        // Fail CLOSED: require a real cron secret or a real admin token. Unlike key issuance,
+        // this must NOT fall through the "no adminToken => everyone is admin" dev default —
+        // an unconfigured deploy would leave the snapshot sweep world-triggerable (v2/B fix).
         const isCron = !!cronSecret && bearer(req.headers.authorization) === cronSecret;
-        if (!isAdmin && !isCron) return json(401, { error: "admin or cron only" });
+        const isRealAdmin = !!adminToken && bearer(req.headers.authorization) === adminToken;
+        if (!isCron && !isRealAdmin) return json(401, { error: "admin or cron only" });
         const day = utcDay();
         const ids = await cp.listAllProjectIds();
         for (const id of ids) {

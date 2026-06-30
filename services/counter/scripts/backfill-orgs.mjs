@@ -20,14 +20,17 @@ const db = drizzle(neon(process.env.DATABASE_URL));
 
 // Deterministic ids derived from the user id => re-running upserts the same rows.
 // `’s Org` uses U+2019 (not a SQL quote), matching the signup hook's naming; no escaping.
+// Guard every step on EXISTS user: a project whose legacy owner has no user row stays
+// UN-migrated (org_id untouched) rather than getting a member-less orphan org. It then
+// trips the hard "not all migrated" throw below — fail loud, don't silently strand it.
 const createOrgs = sql`
   INSERT INTO organization (id, name, slug, created_at)
   SELECT DISTINCT 'org_personal_' || p.org_id,
-                  COALESCE(u.name, 'Personal') || '’s Org',
+                  u.name || '’s Org',
                   'personal-' || p.org_id,
                   now()
   FROM projects p
-  LEFT JOIN "user" u ON u.id = p.org_id
+  JOIN "user" u ON u.id = p.org_id
   WHERE p.org_id <> '' AND p.org_id NOT IN (SELECT id FROM organization)
   ON CONFLICT (id) DO NOTHING`;
 
@@ -41,15 +44,17 @@ const createMembers = sql`
 
 const repointProjects = sql`
   UPDATE projects p SET org_id = 'org_personal_' || p.org_id
-  WHERE p.org_id <> '' AND p.org_id NOT IN (SELECT id FROM organization)`;
+  WHERE p.org_id <> '' AND p.org_id NOT IN (SELECT id FROM organization)
+    AND EXISTS (SELECT 1 FROM "user" u WHERE u.id = p.org_id)`;
 
 // --- run, in order ---
 await db.execute(createOrgs);
 await db.execute(createMembers);
 await db.execute(repointProjects);
 
-// --- verify: every non-empty project now points at a real org; report orphans (legacy
-// owner with no matching user — preserved, but no member can access it). ---
+// --- verify: every non-empty project now points at a real org. A project whose legacy
+// owner has no user row is left un-migrated by the EXISTS-guarded steps above, so it shows
+// up as projects > migrated and HARD-FAILS below (loud, not a silent member-less orphan). ---
 const [counts] = await db.execute(sql`
   SELECT
     (SELECT count(*) FROM projects WHERE org_id <> '') AS projects,
@@ -64,8 +69,12 @@ const [counts] = await db.execute(sql`
 
 console.log("backfill complete:", counts);
 if (Number(counts.projects) !== Number(counts.migrated)) {
-  throw new Error(`NOT all projects migrated: ${counts.migrated}/${counts.projects} — investigate`);
+  throw new Error(
+    `NOT all projects migrated: ${counts.migrated}/${counts.projects} — some project's legacy ` +
+      `owner has no user row. Resolve those owners (or delete the dead projects) and re-run.`,
+  );
 }
+// Belt-and-suspenders: with the EXISTS guards this should always be 0; fail if it ever isn't.
 if (Number(counts.orphan_orgs) > 0) {
-  console.warn(`⚠ ${counts.orphan_orgs} org(s) have no owner member (legacy owner had no user row).`);
+  throw new Error(`${counts.orphan_orgs} org(s) have no owner member — investigate before continuing.`);
 }
