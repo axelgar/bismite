@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireOrg } from "@/lib/session";
 import * as counter from "@/lib/counter";
+import { getOrgCustomerId } from "@/lib/org";
 import { stripe, billingEnabled, PRICE_PRO } from "@/lib/stripe";
 
 const APP_URL = process.env.BETTER_AUTH_URL ?? "http://localhost:3001";
@@ -39,16 +40,18 @@ export async function checkoutAction(projectId: string) {
   if (!project) return { error: "Not found" as const };
   if (!billingEnabled) return { error: "Billing is not configured" as const };
 
+  // Customer = the org (#3): reuse the org's customer if it has one (any prior checkout on
+  // any of its projects), else let Stripe create one keyed to the signed-in email — the
+  // webhook then stores it on the org. orgId attributes the customer; projectId flips the
+  // enforced tier. Both ride the session and the subscription so every event maps cleanly.
+  const customerId = await getOrgCustomerId(orgId);
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
     line_items: [{ price: PRICE_PRO, quantity: 1 }],
-    // Reuse the project's customer if it has one (resubscribe), else let Stripe create one
-    // keyed to the signed-in email. projectId rides on both the session and the subscription
-    // so every lifecycle event maps back to exactly one project in the webhook.
-    ...(project.stripeCustomerId ? { customer: project.stripeCustomerId } : { customer_email: user.email }),
+    ...(customerId ? { customer: customerId } : { customer_email: user.email }),
     client_reference_id: projectId,
-    metadata: { projectId },
-    subscription_data: { metadata: { projectId } },
+    metadata: { orgId, projectId },
+    subscription_data: { metadata: { orgId, projectId } },
     success_url: `${APP_URL}/dashboard/${projectId}?upgraded=1`,
     cancel_url: `${APP_URL}/dashboard/${projectId}`,
   });
@@ -58,12 +61,13 @@ export async function checkoutAction(projectId: string) {
 
 export async function portalAction(projectId: string) {
   const { orgId } = await requireOrg();
-  const project = await counter.ownedProject(orgId, projectId);
-  if (!project) return { error: "Not found" as const };
-  if (!project.stripeCustomerId) return { error: "No billing account yet" as const };
+  // Authz: the project must be in the active org. The portal manages the org's customer.
+  if (!(await counter.ownedProject(orgId, projectId))) return { error: "Not found" as const };
+  const customerId = await getOrgCustomerId(orgId);
+  if (!customerId) return { error: "No billing account yet" as const };
 
   const session = await stripe.billingPortal.sessions.create({
-    customer: project.stripeCustomerId,
+    customer: customerId,
     return_url: `${APP_URL}/dashboard/${projectId}`,
   });
   redirect(session.url);

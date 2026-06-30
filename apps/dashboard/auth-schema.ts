@@ -87,6 +87,10 @@ export const organization = pgTable("organization", {
   logo: text("logo"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   metadata: text("metadata"),
+  // Stripe customer = the org, not the user/project (PRD-v2a #3). One customer per org,
+  // reused across all its projects; created lazily on first checkout. Plan stays per-project
+  // on the counter (the enforced tier); this is just the billing identity. Null until first buy.
+  stripeCustomerId: text("stripe_customer_id"),
 });
 
 export const member = pgTable(

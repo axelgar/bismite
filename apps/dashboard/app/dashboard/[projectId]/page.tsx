@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { requireOrg } from "@/lib/session";
 import { ownedProject, usageSummary, usageHistory } from "@/lib/counter";
+import { getOrgCustomerId } from "@/lib/org";
 import { planFor } from "@/lib/plans";
 import { billingEnabled } from "@/lib/stripe";
 import { TopBar } from "@/components/top-bar";
@@ -25,6 +26,8 @@ export default async function ProjectDetail({
   // Charts are non-critical: a snapshot-history blip must not 500 the project page.
   const history = await usageHistory(projectId).catch(() => []);
   const plan = planFor(project.plan);
+  // Billing identity is the org's, shared across its projects (#3) — drives Manage-billing.
+  const hasCustomer = Boolean(await getOrgCustomerId(orgId));
 
   return (
     <>
@@ -55,7 +58,7 @@ export default async function ProjectDetail({
           planName={plan.name}
           keys={project.keys.map((k) => ({ mode: k.mode, lastUsedAt: k.lastUsedAt }))}
           billingEnabled={billingEnabled}
-          hasCustomer={Boolean(project.stripeCustomerId)}
+          hasCustomer={hasCustomer}
           upgraded={upgraded === "1"}
         />
       </main>

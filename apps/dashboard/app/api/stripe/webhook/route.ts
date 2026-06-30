@@ -1,10 +1,12 @@
 import type Stripe from "stripe";
 import { stripe, WEBHOOK_SECRET } from "@/lib/stripe";
 import { setBilling } from "@/lib/counter";
+import { setOrgCustomerId } from "@/lib/org";
 
 // Stripe is the source of truth for paid plans (#6). This verified webhook is the ONLY
-// place that flips a project to/from Pro — no user action can. projectId rides on the
-// checkout session and the subscription metadata, so each event maps to one project.
+// place that flips a project to/from Pro — no user action can. The customer belongs to the
+// org (#3) and the enforced tier to the project, so orgId + projectId both ride the
+// checkout session and the subscription metadata; each event maps to one org + one project.
 export const runtime = "nodejs"; // signature verification + the BFF admin call need Node
 
 export async function POST(req: Request) {
@@ -25,9 +27,12 @@ export async function POST(req: Request) {
     switch (event.type) {
       case "checkout.session.completed": {
         const s = event.data.object as Stripe.Checkout.Session;
+        const orgId = s.metadata?.orgId;
         const projectId = s.metadata?.projectId ?? s.client_reference_id;
         const customer = typeof s.customer === "string" ? s.customer : s.customer?.id;
-        if (projectId) await setBilling(projectId, "pro", customer ?? undefined);
+        // Customer lands on the org (created lazily here on first checkout); plan on the project.
+        if (orgId && customer) await setOrgCustomerId(orgId, customer);
+        if (projectId) await setBilling(projectId, "pro");
         break;
       }
       // Cancel / lapse via the Customer Portal => back to Free. Keep the customer id so a
