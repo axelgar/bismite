@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { requireOrg } from "@/lib/session";
+import { requireOrg, canManageKeys, canManageBilling } from "@/lib/session";
 import { ownedProject, usageSummary, usageHistory } from "@/lib/counter";
 import { getOrgCustomerId } from "@/lib/org";
 import { planFor } from "@/lib/plans";
@@ -19,7 +19,7 @@ export default async function ProjectDetail({
 }) {
   const { projectId } = await params;
   const { upgraded } = await searchParams;
-  const { user, orgId } = await requireOrg();
+  const { user, orgId, role } = await requireOrg();
   const project = await ownedProject(orgId, projectId);
   if (!project) notFound();
   const usage = await usageSummary(projectId);
@@ -59,6 +59,8 @@ export default async function ProjectDetail({
           keys={project.keys.map((k) => ({ mode: k.mode, lastUsedAt: k.lastUsedAt }))}
           billingEnabled={billingEnabled}
           hasCustomer={hasCustomer}
+          canManageKeys={canManageKeys(role)}
+          canManageBilling={canManageBilling(role)}
           upgraded={upgraded === "1"}
         />
       </main>

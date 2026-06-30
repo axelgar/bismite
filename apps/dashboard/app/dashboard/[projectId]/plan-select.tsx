@@ -72,11 +72,13 @@ export function PlanSection({
   plan,
   billingEnabled,
   hasCustomer,
+  canManageBilling,
 }: {
   projectId: string;
   plan: PlanId;
   billingEnabled: boolean;
   hasCustomer: boolean;
+  canManageBilling: boolean;
 }) {
   const { pending, err, run } = useBilling();
 
@@ -90,7 +92,7 @@ export function PlanSection({
             and cancellations go through Stripe.
           </p>
         </div>
-        {plan === "pro" && (
+        {plan === "pro" && canManageBilling && (
           <Button
             variant="secondary"
             onClick={run(portalAction, projectId)}
@@ -132,7 +134,7 @@ export function PlanSection({
               </div>
 
               <div className="mt-4">
-                {id === "pro" && plan === "free" && (
+                {id === "pro" && plan === "free" && canManageBilling && (
                   <Button
                     size="sm"
                     onClick={run(checkoutAction, projectId)}

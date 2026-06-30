@@ -6,6 +6,8 @@ import type { PlanId } from "@/lib/plans";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { UsageCard, meterState } from "@/components/meter";
+import { TrendChart } from "@/components/trend-chart";
+import type { UsageSnapshot } from "@/lib/counter";
 import { Segmented } from "@/components/segmented";
 import { CodeBlock } from "@/components/code-block";
 import { Regenerate } from "./regenerate";
@@ -21,6 +23,7 @@ export function ProjectTabs({
   period,
   mtu,
   calls,
+  history,
   mtuLimit,
   callsLimit,
   planId,
@@ -28,12 +31,15 @@ export function ProjectTabs({
   keys,
   billingEnabled,
   hasCustomer,
+  canManageKeys,
+  canManageBilling,
   upgraded,
 }: {
   projectId: string;
   period: string;
   mtu: number;
   calls: number;
+  history: UsageSnapshot[];
   mtuLimit: number;
   callsLimit: number;
   planId: PlanId;
@@ -41,6 +47,8 @@ export function ProjectTabs({
   keys: KeyView[];
   billingEnabled: boolean;
   hasCustomer: boolean;
+  canManageKeys: boolean;
+  canManageBilling: boolean;
   upgraded: boolean;
 }) {
   const [mode, setMode] = useState<Mode>("live");
@@ -79,7 +87,11 @@ export function ProjectTabs({
                 <span className="max-w-[55%] text-xs leading-snug text-muted-foreground">
                   New users may not be tracked until you upgrade.
                 </span>
-                <UpgradeButton projectId={projectId} plan={planId} billingEnabled={billingEnabled} size="sm" />
+                {canManageBilling ? (
+                  <UpgradeButton projectId={projectId} plan={planId} billingEnabled={billingEnabled} size="sm" />
+                ) : (
+                  <span className="text-xs text-muted-foreground">Ask the org owner to upgrade.</span>
+                )}
               </div>
             )}
           </UsageCard>
@@ -95,6 +107,25 @@ export function ProjectTabs({
           MTU is the headline limit (over it surfaces an upgrade); calls are a guardrail. Test traffic
           isn’t metered.
         </p>
+
+        <h3 className="mt-8 text-[15px] font-semibold">Trend</h3>
+        <p className="mt-1 text-[12.5px] text-muted-foreground">Daily snapshots — history starts the day you do.</p>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <TrendChart
+            label="Monthly Tracked Users"
+            data={history.map((s) => ({ date: s.date, value: s.mtu }))}
+            gradientId="trend-mtu"
+            from="#9B7CFF"
+            to="#7CB5FF"
+          />
+          <TrendChart
+            label="Calls"
+            data={history.map((s) => ({ date: s.date, value: s.calls }))}
+            gradientId="trend-calls"
+            from="#7CB5FF"
+            to="#9B7CFF"
+          />
+        </div>
       </TabsContent>
 
       {/* ---- Plan ---- */}
@@ -104,6 +135,7 @@ export function ProjectTabs({
           plan={planId}
           billingEnabled={billingEnabled}
           hasCustomer={hasCustomer}
+          canManageBilling={canManageBilling}
         />
       </TabsContent>
 
@@ -134,7 +166,11 @@ export function ProjectTabs({
                   : "never used"}
               </div>
             </div>
-            <Regenerate projectId={projectId} mode={mode} />
+            {canManageKeys ? (
+              <Regenerate projectId={projectId} mode={mode} />
+            ) : (
+              <span className="text-xs text-muted-foreground">Admins manage keys</span>
+            )}
           </div>
         </div>
         <p className="mt-3 text-[13px] text-muted-foreground">
