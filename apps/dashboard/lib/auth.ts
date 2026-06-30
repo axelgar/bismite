@@ -4,10 +4,24 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { organization } from "better-auth/plugins";
 import { APIError } from "better-auth/api";
 import { randomBytes } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { db } from "./db";
-import { member } from "../auth-schema";
+import { member, invitation } from "../auth-schema";
 import { sendEmail } from "./email";
+
+// Where invite links point. Same env the auth callbacks use; localhost in dev.
+const APP_URL = process.env.BETTER_AUTH_URL ?? "http://localhost:3001";
+
+// Does this email have an invitation waiting? Lets an invited teammate sign up even when
+// they're not on SIGNUP_ALLOWLIST — the invite IS the authorization (PRD-v2a §8).
+async function hasPendingInvite(email: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: invitation.id })
+    .from(invitation)
+    .where(and(eq(invitation.email, email.toLowerCase()), eq(invitation.status, "pending")))
+    .limit(1);
+  return Boolean(row);
+}
 
 // Personal-org slug: email local-part, alnum-only, + a short random suffix so two
 // "alex@…" signups never collide on the unique slug. ponytail: random suffix, not a
@@ -66,13 +80,30 @@ export const auth = betterAuth({
   },
   // Everything is an org (PRD-v2a §1). Default roles owner/admin/member match the PRD's
   // three exactly, so no custom access-control here — who-can-touch-keys/billing is
-  // enforced app-side in the dashboard. Invitation email wiring lands with the team UI.
-  plugins: [organization()],
+  // enforced app-side in the dashboard (see actions.ts role gates).
+  plugins: [
+    organization({
+      // Resend the invite via the existing transactional sender. The link lands on the
+      // accept page, which joins the invitee to the org with their assigned role.
+      async sendInvitationEmail(data) {
+        await sendEmail(
+          data.email,
+          `${data.inviter.user.name} invited you to ${data.organization.name} on Bismite`,
+          emailHtml(
+            `${data.inviter.user.name} (${data.inviter.user.email}) invited you to join ${data.organization.name} as ${data.role}.`,
+            "Accept invitation",
+            `${APP_URL}/accept-invitation/${data.id}`,
+          ),
+        );
+      },
+    }),
+  ],
   databaseHooks: {
     user: {
       create: {
         before: async (user) => {
-          if (!signupAllowed(user.email)) {
+          // Allowlist gates open signup; a pending org invitation is its own authorization.
+          if (!signupAllowed(user.email) && !(await hasPendingInvite(user.email))) {
             throw new APIError("FORBIDDEN", { message: "This email isn’t on the invite list yet." });
           }
           return { data: user };

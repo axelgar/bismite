@@ -2,10 +2,16 @@
 // makes before touching the counter — no session => bounce to /signin.
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { auth } from "./auth";
 import { db } from "./db";
 import { member } from "../auth-schema";
+
+export type OrgRole = "owner" | "admin" | "member";
+// Key/project management is admin+owner; billing is owner-only (PRD-v2a roles). A `member`
+// reads usage and uses keys but manages neither.
+export const canManageKeys = (role: OrgRole | null) => role === "owner" || role === "admin";
+export const canManageBilling = (role: OrgRole | null) => role === "owner";
 
 export async function requireUser() {
   const s = await auth.api.getSession({ headers: await headers() });
@@ -30,12 +36,19 @@ export async function requireOrg() {
     orgId = m?.orgId ?? null;
   }
   if (!orgId) redirect("/signin");
-  return { user: s.user, orgId };
+  // The user's role in the active org — gates key/billing actions.
+  const [mr] = await db
+    .select({ role: member.role })
+    .from(member)
+    .where(and(eq(member.userId, s.user.id), eq(member.organizationId, orgId)))
+    .limit(1);
+  return { user: s.user, orgId, role: (mr?.role ?? null) as OrgRole | null };
 }
 
 // Inverse gate for the auth pages (sign in / sign up / reset password): an already
-// signed-in user has no business there, so send them to the dashboard.
-export async function requireNoUser() {
+// signed-in user has no business there, so send them on — to `dest` (e.g. a pending
+// invite the link carried) or the dashboard.
+export async function requireNoUser(dest = "/dashboard") {
   const s = await auth.api.getSession({ headers: await headers() });
-  if (s) redirect("/dashboard");
+  if (s) redirect(dest);
 }

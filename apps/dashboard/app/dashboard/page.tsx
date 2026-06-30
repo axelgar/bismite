@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { ChevronRight, FolderPlus, KeyRound } from "lucide-react";
-import { requireOrg } from "@/lib/session";
+import { requireOrg, canManageKeys } from "@/lib/session";
 import { listProjects } from "@/lib/counter";
 import { TopBar } from "@/components/top-bar";
 import { CreateProject } from "./create-project";
 import { SignOut } from "./sign-out";
 
 export default async function Dashboard() {
-  const { user, orgId } = await requireOrg();
+  const { user, orgId, role } = await requireOrg();
+  const canCreate = canManageKeys(role); // members use keys but don't create projects
   // Degrade gracefully: a counter outage/misconfig shows a banner, not a white-screen 500.
   let projects: Awaited<ReturnType<typeof listProjects>> = [];
   let loadError = false;
@@ -32,7 +33,7 @@ export default async function Dashboard() {
               Each project gets its own test &amp; live API keys.
             </p>
           </div>
-          {projects.length > 0 && <CreateProject />}
+          {projects.length > 0 && canCreate && <CreateProject />}
         </div>
 
         {loadError && (
@@ -59,7 +60,7 @@ export default async function Dashboard() {
                   <code className="font-mono text-foreground-2">BISMITE_API_KEY</code> and you’re metering.
                 </p>
               </div>
-              <CreateProject />
+              {canCreate && <CreateProject />}
             </div>
           </div>
         ) : (

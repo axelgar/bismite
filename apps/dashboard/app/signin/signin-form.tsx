@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 // One form, sign-in/sign-up toggle. better-auth owns the credential handling; we only
 // collect fields and route to /dashboard on success. Invite-only: a non-allowlisted email
 // surfaces the lockdown's 403 message ("This email isn’t on the invite list yet.").
-export function SignInForm() {
+export function SignInForm({ redirect = "/dashboard" }: { redirect?: string }) {
   const router = useRouter();
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [name, setName] = useState("");
@@ -29,7 +29,7 @@ export function SignInForm() {
         : await authClient.signIn.email({ email, password });
     setBusy(false);
     if (res.error) return setError(res.error.message ?? "Something went wrong");
-    router.push("/dashboard");
+    router.push(redirect);
   }
 
   async function forgot() {

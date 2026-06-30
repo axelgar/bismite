@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireOrg } from "@/lib/session";
+import { requireOrg, canManageKeys, canManageBilling } from "@/lib/session";
 import * as counter from "@/lib/counter";
 import { getOrgCustomerId } from "@/lib/org";
 import { stripe, billingEnabled, PRICE_PRO } from "@/lib/stripe";
@@ -12,7 +12,8 @@ const APP_URL = process.env.BETTER_AUTH_URL ?? "http://localhost:3001";
 // never persisted, never re-fetchable (the counter only stores hashes).
 
 export async function createProjectAction(name: string) {
-  const { orgId } = await requireOrg();
+  const { orgId, role } = await requireOrg();
+  if (!canManageKeys(role)) return { error: "Only admins and owners can create projects" as const };
   const clean = name.trim();
   if (!clean) return { error: "Name is required" as const };
   const out = await counter.createProject(clean, orgId);
@@ -21,7 +22,8 @@ export async function createProjectAction(name: string) {
 }
 
 export async function regenerateAction(projectId: string, mode: counter.Mode) {
-  const { orgId } = await requireOrg();
+  const { orgId, role } = await requireOrg();
+  if (!canManageKeys(role)) return { error: "Only admins and owners can rotate keys" as const };
   // Authz gate: regenerate takes only a projectId, so confirm it's in the active org first.
   if (!(await counter.ownedProject(orgId, projectId))) return { error: "Not found" as const };
   const { key } = await counter.regenerate(projectId, mode);
@@ -35,7 +37,8 @@ export async function regenerateAction(projectId: string, mode: counter.Mode) {
 // free self-serve setPlan anymore; counter.setPlan stays an admin/seed lever only.
 
 export async function checkoutAction(projectId: string) {
-  const { user, orgId } = await requireOrg();
+  const { user, orgId, role } = await requireOrg();
+  if (!canManageBilling(role)) return { error: "Only the org owner can manage billing" as const };
   const project = await counter.ownedProject(orgId, projectId);
   if (!project) return { error: "Not found" as const };
   if (!billingEnabled) return { error: "Billing is not configured" as const };
@@ -60,7 +63,8 @@ export async function checkoutAction(projectId: string) {
 }
 
 export async function portalAction(projectId: string) {
-  const { orgId } = await requireOrg();
+  const { orgId, role } = await requireOrg();
+  if (!canManageBilling(role)) return { error: "Only the org owner can manage billing" as const };
   // Authz: the project must be in the active org. The portal manages the org's customer.
   if (!(await counter.ownedProject(orgId, projectId))) return { error: "Not found" as const };
   const customerId = await getOrgCustomerId(orgId);
