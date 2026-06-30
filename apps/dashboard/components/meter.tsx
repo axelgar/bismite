@@ -46,27 +46,43 @@ export function MeterBar({ pct, state }: { pct: number; state: MeterState }) {
   );
 }
 
+// When a meter is over its limit, what does that MEAN? "blocked" = a hard ceiling was hit
+// (Free MTU, or any tier's calls ceiling) → red alarm + "over ceiling". "overage" = expected,
+// billed usage above the included amount (Pro MTU) → softer amber, never alarming a paying
+// customer who's working as intended.
+export type OverTone = "blocked" | "overage";
+
 export function UsageCard({
   label,
   used,
   limit,
   compact = false,
+  overTone = "blocked",
+  overageNote,
   children,
 }: {
   label: string;
   used: number;
   limit: number;
   compact?: boolean;
+  overTone?: OverTone;
+  overageNote?: string;
   children?: React.ReactNode;
 }) {
   const state = meterState(used, limit);
-  const badge = BADGE[state];
+  const isOverage = state === "over" && overTone === "overage";
+  const badge = isOverage ? { variant: "warning" as const, label: "Overage" } : BADGE[state];
+  // Overage reuses the amber "approaching" fill — over-the-line but healthy, not a red alarm.
+  const fillState = isOverage ? "approaching" : state;
   const pct = isFinite(limit) && limit > 0 ? Math.round((used / limit) * 100) : 0;
   const over = isFinite(limit) ? Math.max(0, used - limit) : 0;
+  const overStr = compact ? fmt(over) : over.toLocaleString();
 
   const caption =
     state === "over"
-      ? `${pct}% · ${(compact ? fmt(over) : over.toLocaleString())} over plan`
+      ? isOverage
+        ? `${overStr} over included${overageNote ? ` · ${overageNote}` : ""}`
+        : `${pct}% · ${overStr} over ceiling`
       : state === "approaching"
         ? `${pct}% — approaching limit`
         : isFinite(limit)
@@ -74,13 +90,18 @@ export function UsageCard({
           : "unlimited";
 
   const captionColor =
-    state === "over" ? "text-over" : state === "approaching" ? "text-warning" : "text-muted-foreground";
+    isOverage || state === "approaching"
+      ? "text-warning"
+      : state === "over"
+        ? "text-over"
+        : "text-muted-foreground";
 
   return (
     <div
       className={cn(
         "rounded-[12px] border border-border bg-surface p-[18px] pb-4",
-        state === "over" &&
+        // Red alarm glow only for a HARD block — never for billed overage.
+        state === "over" && !isOverage &&
           "border-[rgba(242,121,61,0.4)] shadow-[inset_0_0_0_1px_rgba(242,121,61,0.06),0_0_36px_-18px_rgba(242,121,61,0.4)]",
       )}
     >
@@ -95,7 +116,7 @@ export function UsageCard({
       </div>
 
       <div className="mt-3.5">
-        <MeterBar pct={pct} state={state} />
+        <MeterBar pct={pct} state={fillState} />
       </div>
       <div className={cn("mt-2.5 font-mono text-[11px] leading-none", captionColor)}>{caption}</div>
 

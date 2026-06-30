@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import type { Mode } from "@/lib/counter";
-import type { PlanId } from "@/lib/plans";
+import { PLANS, type PlanId } from "@/lib/plans";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { UsageCard, meterState } from "@/components/meter";
@@ -59,6 +59,11 @@ export function ProjectTabs({
   }, [upgraded]);
 
   const mtuOver = meterState(mtu, mtuLimit) === "over";
+  const callsOver = meterState(calls, callsLimit) === "over";
+  // On a tier that bills overage (Pro), over-MTU is expected/billed, not a hard block. On
+  // Free (no overage rate) it IS a hard block — new users past the ceiling are refused.
+  const overageRate = PLANS[planId].mtuOveragePer1k;
+  const mtuTone = overageRate == null ? "blocked" : "overage";
   const keyForMode = keys.find((k) => k.mode === mode);
 
   return (
@@ -81,11 +86,17 @@ export function ProjectTabs({
         </div>
 
         <div className="mt-5 grid gap-4 md:grid-cols-2">
-          <UsageCard label="Monthly Tracked Users" used={mtu} limit={mtuLimit}>
-            {mtuOver && (
+          <UsageCard
+            label="Monthly Tracked Users"
+            used={mtu}
+            limit={mtuLimit}
+            overTone={mtuTone}
+            overageNote={overageRate != null ? `billed €${overageRate}/1k` : undefined}
+          >
+            {mtuOver && mtuTone === "blocked" && (
               <div className="mt-3.5 flex items-center justify-between gap-2.5 border-t border-border pt-3.5">
                 <span className="max-w-[55%] text-xs leading-snug text-muted-foreground">
-                  New users may not be tracked until you upgrade.
+                  New users past your limit are blocked until you upgrade.
                 </span>
                 {canManageBilling ? (
                   <UpgradeButton projectId={projectId} plan={planId} billingEnabled={billingEnabled} size="sm" />
@@ -94,18 +105,25 @@ export function ProjectTabs({
                 )}
               </div>
             )}
+            {mtuOver && mtuTone === "overage" && (
+              <div className="mt-3.5 border-t border-border pt-3.5 text-xs leading-snug text-muted-foreground">
+                Above your included MTU — extra is billed at €{overageRate} per 1,000. Your app keeps running.
+              </div>
+            )}
           </UsageCard>
 
           <UsageCard label="Calls" used={calls} limit={callsLimit} compact>
             <div className="mt-3.5 border-t border-border pt-3.5 text-xs leading-snug text-muted-foreground">
-              Soft guardrail — calls are metered but never blocked.
+              {callsOver
+                ? "Over your plan's call ceiling — further calls are blocked. Contact sales to raise it."
+                : "Fair-use ceiling — calls are metered; over the ceiling they're blocked."}
             </div>
           </UsageCard>
         </div>
 
         <p className="mt-4 text-[13px] text-muted-foreground">
-          MTU is the headline limit (over it surfaces an upgrade); calls are a guardrail. Test traffic
-          isn’t metered.
+          MTU is the billed meter (Free blocks past the limit; Pro bills overage). Calls are a hard
+          fair-use ceiling. Test traffic isn’t metered.
         </p>
 
         <h3 className="mt-8 text-[15px] font-semibold">Trend</h3>
